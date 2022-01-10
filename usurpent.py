@@ -31,6 +31,7 @@ class App (tornado.web.Application):
         """
 
         handlers = [
+            (r"/?$", Home),
             (r"(?!\/static.*)(.*)/?", DocHandler),
         ]
 
