@@ -1,0 +1,20 @@
+*.py[o|c|d]
+*.swp
+*.pem
+
+# a good place to put your virtualenv
+env/
+
+# node and our front end builds
+# build/
+node_modules
+
+# default dev datastore
+data.db
+
+#OS X noise
+.DS_Store
+
+# credentials
+keys.py
+
