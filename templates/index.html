@@ -16,11 +16,47 @@
 
   <!-- FONT
   –––––––––––––––––––––––––––––––––––––––––––––––––– -->
-  <link href="//fonts.googleapis.com/css?family=Open+Sans" rel="stylesheet" type="text/css">
+  <link href="//fonts.googleapis.com/css?family=Orbitron" rel="stylesheet" type="text/css">
 
   <!-- CSS
   –––––––––––––––––––––––––––––––––––––––––––––––––– -->
+<style>
 
+  /* see this:  https://web.dev/variable-fonts/ ? */
+
+
+  body, h1 {
+    text-align:  center;
+    font-family: 'Orbitron';
+  }
+
+  #main {
+    margin: calc(20.5% - 210px) 20.5%;
+  }
+
+  input[type="text"] {
+    border: none;
+    background-color: white;
+    outline:  none;
+    font-variant: all-small-caps;
+    font-size: 42px;
+    font-family: 'Orbitron';
+  }
+
+  #login {
+
+    padding: 13px;
+    text-align: center;
+    margin: 13px;
+    border-bottom: 2px solid aliceblue;
+  }
+
+  #login:focus {
+    background-color: white;
+    border-bottom:  2px solid aquamarine;
+  }
+
+</style>
 
   <!-- Favicon
   –––––––––––––––––––––––––––––––––––––––––––––––––– -->
@@ -29,8 +65,21 @@
 </head>
 <body>
 
-  <div id="main">
+  <div 
+    id="main" 
+    style="
+      border:2px solid aliceblue;
+      padding: 200px 0;
+    "
+  >
+    <h1>USURPENT</h1>
 
+    <label for="username">What are you called?</label>
+    <input id="login" type="text" name="username" ><br />
+    <button style="
+      margin: 2rem;
+                  "
+    >PLAY</button>
   </div>
 
 <!-- End Document
