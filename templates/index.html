@@ -30,7 +30,7 @@
     font-family: 'Orbitron';
   }
 
-  #main {
+  #welcome {
     margin: calc(20.5% - 210px) 20.5%;
   }
 
@@ -56,6 +56,27 @@
     border-bottom:  2px solid aquamarine;
   }
 
+  .hide {
+    display: none;
+  }
+
+  #screenwrapper {
+    display: inline-block;
+    position: relative;
+    width: 100%;
+    padding-bottom: 100%;
+    vertical-align: top;
+    overflow: hidden;
+  }
+
+  #screen {
+
+    display: inline-block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    border: 2px solid aquamarine;
+  }
 </style>
 
   <!-- Favicon
@@ -66,7 +87,7 @@
 <body>
 
   <div 
-    id="main" 
+    id="welcome" 
     style="
       border:2px solid aliceblue;
       padding: 200px 0;
@@ -74,12 +95,18 @@
   >
     <h1>USURPENT</h1>
 
-    <label for="username">What are you called?</label>
-    <input id="login" type="text" name="username" ><br />
-    <button style="
-      margin: 2rem;
-                  "
+    <label for="alias">What are you called?</label>
+    <input id="login" type="text" name="alias" ><br />
+    <button 
+      id="cta"
+      style="margin: 2rem;"
     >PLAY</button>
+
+
+  </div>
+
+  <div id="screenwrapper"  class="hide">
+    <svg id="screen" preserveAspectRatio="xMidYMid meet" viewBox="0 0 420 420" />
   </div>
 
 <!-- End Document
@@ -87,4 +114,5 @@
 </body>
 
     <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="/static/game.js"></script>
 </html>
