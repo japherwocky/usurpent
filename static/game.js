@@ -73,10 +73,13 @@ function chart(data) {
       .attr("stroke-linecap", "round");
 
 
+
+
     setInterval( function () {
     // 0 length paths are supposed to be more performant than circles
-        var ents = g.selectAll("path")
-            .data(window.data, (d,i) => i )  // second arg to .data is a function to make a key
+
+            var ents = g.selectAll("path")
+        .data(window.data) // , d => d.uuid )  // second arg to .data is a function to make a key
 
             // on creation
         ents.enter()
@@ -85,7 +88,7 @@ function chart(data) {
                 .attr("d", d => `M${x(d.x)},${y(d.y)}h0`)
                 .attr("stroke", d => z(d.color))
                 .attr("stroke-width", 13)
-                .attr('opacity', .39)
+                .attr('opacity', .61)
 
 
 
@@ -99,20 +102,21 @@ function chart(data) {
         // remove
         ents.exit().remove();
 
-    }, 250)
+    }, 150)
 
 
     svg.on('click', function(event,d) {
 
-        pt = [x.invert(event.x), y.invert(event.y)]  // cast our coordinates to model space
+        pt = [x.invert(event.layerX), y.invert(event.layerY)]  // cast our coordinates to model space
 
         window.data.map( d=> {
             let delta_x = pt[0] - d.x
             let delta_y = pt[1] - d.y
             let dist = Math.sqrt( delta_x**2 + delta_y**2 )
 
-            d.x += delta_x / dist
-            d.y += delta_y / dist
+            // normalize vectors
+            d.x += Math.min(delta_x, delta_x / dist) || 0
+            d.y += Math.min(delta_y, delta_y / dist) || 0  // move towards the point with max speed of 1
             return d 
         })
         console.log(pt)
@@ -120,7 +124,54 @@ function chart(data) {
     })
 
 
+    document.onmousemove = handleMouseMove;
+    function handleMouseMove(event) {
+      var eventDoc, doc, body, pageX, pageY;
+      
+      event = event || window.event; // IE-ism
+      
+      // If pageX/Y aren't available and clientX/Y
+      // are, calculate pageX/Y - logic taken from jQuery
+      if (event.pageX == null && event.clientX != null) {
+        eventDoc = (event.target && event.target.ownerDocument) || document;
+        doc = eventDoc.documentElement;
+        body = eventDoc.body;
 
+        event.pageX = event.clientX +
+          (doc && doc.scrollLeft || body && body.scrollLeft || 0) -
+          (doc && doc.clientLeft || body && body.clientLeft || 0);
+        event.pageY = event.clientY +
+          (doc && doc.scrollTop  || body && body.scrollTop  || 0) -
+          (doc && doc.clientTop  || body && body.clientTop  || 0 );
+      }
+
+        let target = [x.invert(event.layerX), y.invert(event.layerY)]
+
+        window.data.map( d=> {
+            let delta_x = target[0] - d.x  
+            let delta_y = target[1] - d.y
+            let dist = Math.sqrt( delta_x**2 + delta_y**2 )
+
+            // if a big move, cap / normalize our speeds
+            if (dist > 1) {
+
+                console.log(dist,delta_x, delta_y)
+                // normalize vectors
+                delta_x /= dist
+                delta_y /= dist // move towards the point with max speed of 1
+            }
+
+            // and if we've moved, update positions
+            if (dist > 1e-3) {
+
+                d.x += delta_x 
+                d.y += delta_y 
+            }
+
+            return d 
+        })
+
+    }
 }
 
 
@@ -135,7 +186,7 @@ function mkData() {
 
     const random = d3.randomNormal(0, 1);
 
-    return Array.from({length: 300}, f => {
+    return Array.from({length: 13}, f => {
         out = {}
         out.id = uuidv4()
         out.x = random()
