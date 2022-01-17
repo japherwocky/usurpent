@@ -74,17 +74,16 @@ function chart(data) {
 
 
 
-
+    // our main tick()
     setInterval( function () {
-    // 0 length paths are supposed to be more performant than circles
 
-            var ents = g.selectAll("path")
-        .data(window.data) // , d => d.uuid )  // second arg to .data is a function to make a key
+        var ents = g.selectAll("path")
+            .data(window.data) // , d => d.uuid )  // second arg to .data is a function to make a key
 
-            // on creation
+        // create
         ents.enter()
             .append('path')
-                .transition().duration(250)
+                .transition().duration(32)  // see tick speed below
                 .attr("d", d => `M${x(d.x)},${y(d.y)}h0`)
                 .attr("stroke", d => z(d.color))
                 .attr("stroke-width", 13)
@@ -94,15 +93,15 @@ function chart(data) {
 
         // update
         ents
-            .transition().duration(250)
+            // .transition().duration(54)
             .attr("d", d => `M${x(d.x)},${y(d.y)}h0`)
-            .attr("stroke", d => z(d.id))  // will size change?
+            // .attr("stroke", d => z(d.id))  // color.. probably does not need to update
 
 
         // remove
         ents.exit().remove();
 
-    }, 150)
+    }, 33)  // aim for 30fps
 
 
     svg.on('click', function(event,d) {
@@ -152,14 +151,21 @@ function chart(data) {
             let delta_y = target[1] - d.y
             let dist = Math.sqrt( delta_x**2 + delta_y**2 )
 
+
+
             // if a big move, cap / normalize our speeds
             if (dist > 1) {
 
-                console.log(dist,delta_x, delta_y)
                 // normalize vectors
-                delta_x /= dist
+                delta_x /= dist 
                 delta_y /= dist // move towards the point with max speed of 1
             }
+
+
+            let u = 5e-3 // something like a coefficient of friction
+
+            delta_x *= u
+            delta_y *= u
 
             // and if we've moved, update positions
             if (dist > 1e-3) {
@@ -184,7 +190,7 @@ function uuidv4() {
 
 function mkData() {
 
-    const random = d3.randomNormal(0, 1);
+    const random = d3.randomNormal(0, 1);  // random factory with a normal (Gaussian) distribution
 
     return Array.from({length: 13}, f => {
         out = {}
@@ -196,13 +202,6 @@ function mkData() {
         return out
     })
 
-
-  const sqrt3 = Math.sqrt(3);
-  return [].concat(
-    Array.from({length: 300}, () => [random() + sqrt3, random() + 1, 0]),
-    Array.from({length: 300}, () => [random() - sqrt3, random() + 1, 1]),
-    Array.from({length: 300}, () => [random(), random() - 1, 2])
-  );
 }
 
 
