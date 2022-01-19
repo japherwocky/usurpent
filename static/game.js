@@ -74,34 +74,52 @@ function mkScreen() {
 
 
 
-    // our main tick()
-    setInterval( function () {
 
-        var ents = g.selectAll("path")
-            .data(USURPENT.particles) // , d => d.uuid )  // second arg to .data is a function to make a key
+    const randomcolor = d3.randomNormal(0, 1);
+
+
+
+    // our particle tick()
+    setInterval( 
+        function () {
+
+
+        // color shifting just so we can see the tick happening
+        USURPENT.particles = USURPENT.particles.map( particle => {
+
+            particle.color = randomcolor();
+            return particle;
+
+        })
+
+
+        let parts = g.selectAll("path.particle")
+            .data(USURPENT.particles, d => d.id )  // second arg to .data is a function to make a key
 
         // create
-        ents.enter()
+        parts.enter()
             .append('path')
+                .attr('class', 'particle')
                 .transition().duration(32)  // see tick speed below
                 .attr("d", d => `M${x(d.x)},${y(d.y)}h0`)
                 .attr("stroke", d => z(d.color))
-                .attr("stroke-width", 13)
+                .attr("stroke-width", 26)
                 .attr('opacity', .61)
 
 
 
         // update
-        ents
-            // .transition().duration(54)
+        parts
+            .transition().duration(420)
             .attr("d", d => `M${x(d.x)},${y(d.y)}h0`)
-            // .attr("stroke", d => z(d.id))  // color.. probably does not need to update
+            .attr("stroke", d => z(d.color)) 
+            .attr('stroke-width', 13)
 
 
         // remove
-        ents.exit().remove();
+        parts.exit().remove();
 
-    }, 33)  // aim for 30fps
+    }, 1000) // 33)  // for players we aim for 30fps, particles we can update less often
 
 
     svg.on('click', function(event,d) {
