@@ -68,11 +68,15 @@ function mkScreen() {
 
     // a group of paths for our particles
     const g = svg.append("g")
-        .attr("class", "particles")
         .attr("fill", "none")
-        .attr("stroke-linecap", "round");
+        .attr("stroke-linecap", "round")
+        .attr("class", "particles")
 
-
+    // and one for entities
+    const gEnts = svg.append("g")
+        .attr("fill", "none")
+        .attr("stroke-linecap", "round")
+        .attr("class", "entities")
 
 
     const randomcolor = d3.randomNormal(0, 1);
@@ -80,9 +84,7 @@ function mkScreen() {
 
 
     // our particle tick()
-    setInterval( 
-        function () {
-
+    setInterval( function () {
 
         // color shifting just so we can see the tick happening
         USURPENT.particles = USURPENT.particles.map( particle => {
@@ -122,8 +124,8 @@ function mkScreen() {
     }, 1000) // 33)  // for players we aim for 30fps, particles we can update less often
 
 
+    /* 
     svg.on('click', function(event,d) {
-
         pt = [x.invert(event.layerX), y.invert(event.layerY)]  // cast our coordinates to model space
 
         window.data.map( d=> {
@@ -137,8 +139,49 @@ function mkScreen() {
             return d 
         })
         console.log(pt)
-
     })
+    */
+
+
+    // Player / Entity tick()
+    setInterval( function () { 
+
+        // update coordinates based on last bearing / velocity
+
+        USURPENT.entities = USURPENT.entities.map( ent => {
+
+            ent.x += ent.bearing[0]
+            ent.y += ent.bearing[1]
+
+            return ent
+
+        })
+
+
+
+        let ents = gEnts.selectAll('path')
+            .data(USURPENT.entities, d => d.id )
+
+
+        // CREATE
+        ents.enter().append('path')
+            .attr('class', 'ent')
+            .attr("d", d => `M${x(d.x)},${y(d.y)}h0`)
+            .attr("stroke", d => z(d.color))
+            .attr("stroke-width", 26)
+            .attr('opacity', 1)
+
+
+        // UPDATE
+        ents
+            .attr("d", d => `M${x(d.x)},${y(d.y)}h0`)
+            .attr("stroke", d => z(d.color))
+
+
+        // REMOVE
+        ents.exit().remove();
+
+    }, 33)  // aim for 33 fps
 
 
     document.onmousemove = handleMouseMove;
@@ -172,7 +215,7 @@ function mkScreen() {
 
 
             // if a big move, cap / normalize our speeds
-            if (dist > 1) {
+            if (dist > d.velocity) {
 
                 // normalize vectors
                 delta_x /= dist 
@@ -180,16 +223,15 @@ function mkScreen() {
             }
 
 
-            let u = 5e-3 // something like a coefficient of friction
+            let u = 5e-3 // something like a coefficient of friction.. better is to adjust actual velocity value ?
 
             delta_x *= u
             delta_y *= u
 
-            // and if we've moved, update positions
+            // and if we've moved, update bearing
             if (dist > 1e-3) {
 
-                d.x += delta_x 
-                d.y += delta_y 
+                d.bearing = [delta_x, delta_y]
             }
 
             return d 
@@ -231,6 +273,8 @@ function mkData() {
         out.color = random()
 
         out.score = 1
+        out.velocity = 1
+        out.bearing = [0,0]
 
         return out
 
@@ -246,12 +290,6 @@ function mkData() {
 
 
 function main () {
-
-    // var USURPENT = {}
-
-    // var [particles, entities] = mkData()
-    // USURPENT.particles  = particles
-    // USURPENT.entities   = entities
 
     window.USURPENT = {...mkData()}
 
