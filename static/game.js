@@ -19,8 +19,7 @@ document.getElementById('cta').addEventListener('click', function(e) {
 
 
 
-function chart(data) { 
-    window.data = data;
+function mkScreen() { 
 
     const svg = d3.select('svg')
 
@@ -52,7 +51,7 @@ function chart(data) {
         .range([bounds.height, 0])
 
     const z = d3.scaleOrdinal()
-        .domain(data.map(d => d.color))
+        .domain(USURPENT.particles.map(d => d.color))
         .range(d3.schemeCategory10)
 
 
@@ -67,10 +66,11 @@ function chart(data) {
         )                                                                                                       
 
 
-    // a group of paths for our circles
+    // a group of paths for our particles
     const g = svg.append("g")
-      .attr("fill", "none")
-      .attr("stroke-linecap", "round");
+        .attr("class", "particles")
+        .attr("fill", "none")
+        .attr("stroke-linecap", "round");
 
 
 
@@ -78,7 +78,7 @@ function chart(data) {
     setInterval( function () {
 
         var ents = g.selectAll("path")
-            .data(window.data) // , d => d.uuid )  // second arg to .data is a function to make a key
+            .data(USURPENT.particles) // , d => d.uuid )  // second arg to .data is a function to make a key
 
         // create
         ents.enter()
@@ -146,7 +146,7 @@ function chart(data) {
 
         let target = [x.invert(event.layerX), y.invert(event.layerY)]
 
-        window.data.map( d=> {
+        USURPENT.entities.map( d=> {
             let delta_x = target[0] - d.x  
             let delta_y = target[1] - d.y
             let dist = Math.sqrt( delta_x**2 + delta_y**2 )
@@ -190,9 +190,11 @@ function uuidv4() {
 
 function mkData() {
 
+    var particles, entities
+
     const random = d3.randomNormal(0, 1);  // random factory with a normal (Gaussian) distribution
 
-    return Array.from({length: 13}, f => {
+    particles = Array.from({length: 13}, f => {
         out = {}
         out.id = uuidv4()
         out.x = random()
@@ -201,6 +203,22 @@ function mkData() {
 
         return out
     })
+
+    entities = Array.from({length: 1}, f => {
+
+        out = {}
+        out.id = uuidv4()
+        out.x = 0
+        out.y = 0
+        out.color = random()
+
+        out.score = 1
+
+        return out
+
+    })
+
+    return {'particles':particles, 'entities': entities}
 
 }
 
@@ -211,6 +229,14 @@ function mkData() {
 
 function main () {
 
-    chart(mkData())
+    // var USURPENT = {}
+
+    // var [particles, entities] = mkData()
+    // USURPENT.particles  = particles
+    // USURPENT.entities   = entities
+
+    window.USURPENT = {...mkData()}
+
+    mkScreen();
 
 }
