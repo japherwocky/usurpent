@@ -83,13 +83,35 @@ function mkScreen() {
 
 
 
-    // our particle tick()
+
+
+
+    // PARTICLES
     setInterval( function () {
+
+        const t = performance.now();
+
+
+
+
 
         // color shifting just so we can see the tick happening
         USURPENT.particles = USURPENT.particles.map( particle => {
 
             particle.color = randomcolor();
+
+
+        function rotate(cx, cy, x, y, angle) {
+            var radians = (Math.PI / 180) * angle,
+            cos = Math.cos(radians),
+            sin = Math.sin(radians),
+            nx = (cos * (x - cx)) + (sin * (y - cy)) + cx,
+            ny = (cos * (y - cy)) - (sin * (x - cx)) + cy;
+            return [nx, ny];
+        }
+
+            [particle.x, particle.y] = rotate(particle.target[0], particle.target[1], particle.x, particle.y, 13)
+
             return particle;
 
         })
@@ -105,7 +127,7 @@ function mkScreen() {
                 .transition().duration(32)  // see tick speed below
                 .attr("d", d => `M${x(d.x)},${y(d.y)}h0`)
                 .attr("stroke", d => z(d.color))
-                .attr("stroke-width", 26)
+                .attr("stroke-width", d => d.r * 3) 
                 .attr('opacity', .61)
 
 
@@ -115,45 +137,29 @@ function mkScreen() {
             .transition().duration(420)
             .attr("d", d => `M${x(d.x)},${y(d.y)}h0`)
             .attr("stroke", d => z(d.color)) 
-            .attr('stroke-width', 13)
+            .attr('stroke-width', d => d.r )
 
 
         // remove
         parts.exit().remove();
 
-    }, 1000) // 33)  // for players we aim for 30fps, particles we can update less often
+    }, 100) // 33)  // for players we aim for 30fps, particles we can update less often
 
 
-    /* 
-    svg.on('click', function(event,d) {
-        pt = [x.invert(event.layerX), y.invert(event.layerY)]  // cast our coordinates to model space
-
-        window.data.map( d=> {
-            let delta_x = pt[0] - d.x
-            let delta_y = pt[1] - d.y
-            let dist = Math.sqrt( delta_x**2 + delta_y**2 )
-
-            // normalize vectors
-            d.x += Math.min(delta_x, delta_x / dist) || 0
-            d.y += Math.min(delta_y, delta_y / dist) || 0  // move towards the point with max speed of 1
-            return d 
-        })
-        console.log(pt)
-    })
-    */
-
-
-    // Player / Entity tick()
+    // ENTITIES
     setInterval( function () { 
 
         // update coordinates based on last bearing / velocity
 
         USURPENT.entities = USURPENT.entities.map( ent => {
 
+            // update position based on previous bearing
+
             ent.x += ent.bearing[0]
             ent.y += ent.bearing[1]
 
             return ent
+
 
         })
 
@@ -205,7 +211,7 @@ function mkScreen() {
           (doc && doc.clientTop  || body && body.clientTop  || 0 );
       }
 
-        let target = [x.invert(event.layerX), y.invert(event.layerY)]
+        let target = [x.invert(event.layerX), y.invert(event.layerY)]  // convert from paper space to model space
 
         USURPENT.entities.map( d=> {
             let delta_x = target[0] - d.x  
@@ -232,6 +238,7 @@ function mkScreen() {
             if (dist > 1e-3) {
 
                 d.bearing = [delta_x, delta_y]
+                d.target = [...target]
             }
 
             return d 
@@ -257,8 +264,10 @@ function mkData() {
     particles = Array.from({length: 13}, f => {
         out = {}
         out.id = uuidv4()
-        out.x = random()
-        out.y = random()
+        out.target = [random(),random()]
+        out.x = out.target[0] + random()
+        out.y = out.target[1]
+        out.r = (random() * 13)
         out.color = random()
 
         return out
@@ -270,6 +279,7 @@ function mkData() {
         out.id = uuidv4()
         out.x = 0
         out.y = 0
+        out.r = random()
         out.color = random()
 
         out.score = 1
