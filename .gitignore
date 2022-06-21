@@ -18,3 +18,5 @@ data.db
 # credentials
 keys.py
 
+# whatever vscode is doing
+.vscode
