@@ -12,33 +12,30 @@ document.getElementById('cta').addEventListener('click', function(e) {
 })
 
 
-// set our screen size based on actual browser size
-
-
-
-
-
-
+// first things first, construct our UI
 function mkScreen() { 
 
     const svg = d3.select('svg')
 
-    var bounds = {}
+    
 
-    function setBounds() {
+    function mkBounds() {
 
         let screen = document.getElementById('screen')
+        let bounds = {}
 
-        bounds.height = screen.clientHeight;
-        bounds.width = screen.clientWidth;
+        bounds.height = screen.clientHeight
+        bounds.width = screen.clientWidth
+
+        return bounds
 
     }
 
     // calculate the bounds of our SVG element
-    setBounds()
+    var bounds = mkBounds()
 
     // listen for a browser resize to adjust
-    window.addEventListener('resize', setBounds)
+    window.addEventListener('resize', mkBounds)
 
 
     const k = bounds.height / bounds.width;
@@ -229,7 +226,7 @@ function mkScreen() {
             }
 
 
-            let u = 5e-3 // something like a coefficient of friction.. better is to adjust actual velocity value ?
+            let u = 5e-2 // something like a coefficient of friction.. better is to adjust actual velocity value ?
 
             delta_x *= u
             delta_y *= u
