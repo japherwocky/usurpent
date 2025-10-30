@@ -35,11 +35,11 @@ class App (tornado.web.Application):
             (r"(?!\/static.*)(.*)/?", DocHandler),
         ]
 
-        tornado.web.Application.__init__(self, handlers, **settings)
+        super().__init__(handlers, **settings)
 
 
 class Home(tornado.web.RequestHandler):
-    def get(self):
+    async def get(self):
         self.render('index.html', hello=True)
 
 
@@ -48,22 +48,23 @@ class DocHandler(tornado.web.RequestHandler):
         Main blog post handler.  Look in /docs/ for whatever
         the request is trying for, render it as markdown
     """
-    def get(self, path):
+    async def get(self, path):
 
         path = 'docs/' + path.replace('.', '').strip('/')
-        if exists(path):
+        if exists(path) and os.path.isdir(path):
             # a folder
             lastname = os.path.split(path)[-1]
             txt = open('%s/%s.txt' % (path, lastname)).read()
 
         elif exists(path + '.txt'):
-            txt = open(path+'.txt').read()
+            with open(path + '.txt', 'r') as f:
+                txt = f.read()
 
         else:
             # does not exist!
             raise HTTPError(404)
 
-        doc = markdown(unicode(txt, 'utf-8'))
+        doc = markdown(txt)
         self.render('legacy.html', doc=doc)
 
 
@@ -77,10 +78,8 @@ def main():
 
     if options.runtests:
         # put tests in the tests folder
-        import tests, unittest
-        import sys
-        sys.argv = ['pearachute.py', ]  # unittest messes with argv
-        unittest.main('tests')
+        # Tests not implemented yet
+        print("Tests not implemented yet. Please create tests/ directory first.")
         return
 
     http_server = tornado.httpserver.HTTPServer(App(debug=options.debug), xheaders=True)
