@@ -17,6 +17,28 @@ exists = os.path.exists
 load_dotenv()
 
 
+class BaseHandler(tornado.web.RequestHandler):
+    """Base handler with security headers"""
+    
+    def set_default_headers(self):
+        """Set security headers for all responses"""
+        self.set_header("X-Content-Type-Options", "nosniff")
+        self.set_header("X-Frame-Options", "DENY")
+        self.set_header("X-XSS-Protection", "1; mode=block")
+        self.set_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self.set_header("Content-Security-Policy", 
+                       "default-src 'self'; "
+                       "script-src 'self' 'unsafe-inline'; "
+                       "style-src 'self' 'unsafe-inline'; "
+                       "img-src 'self' data:; "
+                       "font-src 'self'; "
+                       "connect-src 'self'")
+        
+        # HSTS (only in production with HTTPS)
+        if not self.application.settings.get('debug'):
+            self.set_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+
 class App (tornado.web.Application):
     def __init__(self, debug=False):
         """
@@ -44,7 +66,7 @@ class App (tornado.web.Application):
         super().__init__(handlers, **settings)
 
 
-class Home(tornado.web.RequestHandler):
+class Home(BaseHandler):
     async def get(self):
         try:
             logging.info("Serving home page")
@@ -54,7 +76,7 @@ class Home(tornado.web.RequestHandler):
             raise HTTPError(500, "Internal server error")
 
 
-class DocHandler(tornado.web.RequestHandler):
+class DocHandler(BaseHandler):
     """
         Main blog post handler.  Look in /docs/ for whatever
         the request is trying for, render it as markdown
