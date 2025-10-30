@@ -18,5 +18,10 @@ data.db
 # credentials
 keys.py
 
+# environment variables
+.env
+.env.local
+.env.production
+
 # whatever vscode is doing
 .vscode
