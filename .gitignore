@@ -8,6 +8,7 @@ env/
 # node and our front end builds
 # build/
 node_modules
+web/dist
 
 # default dev datastore
 data.db

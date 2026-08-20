@@ -21,15 +21,30 @@ vanilla JS + D3 on the client (being ported to Vite + Svelte — see board).
 - `db.py` — Peewee `SqliteDatabase` + `init_db()` (creates tables; called from
   `App.__init__`).
 - `models.py` — `Account` model (registered players) with bcrypt password helpers.
-- `templates/index.html` — Game entry page (vanilla, D3 from CDN).
-- `templates/legacy.html` — Dead doc renderer; retire during the frontend port.
-- `static/game.js` — Vanilla JS client (D3, WebSocket, prediction/interpolation).
+- `web/` — Vite + Svelte frontend. Source in `web/src`, built to `web/dist`
+  (gitignored). Tornado serves `web/dist` in production; Vite serves it and
+  proxies `/ws` to the backend in development.
+- `templates/` + `static/game.js` — Pre-Svelte reference (vanilla D3 client and
+  entry page). Being retired as the renderer is ported in #182; kept as the port
+  source for now.
 - `static/netcodedemo.html` — Standalone netcode teaching demo.
 - `pyrightconfig.json` — Points pyright at the venv (`venvPath`/`venv`). Do not
   set `pythonPath` there; it is not a valid pyright setting.
 - `requirements.txt` — Runtime deps only.
 - `env/` — Python 3.12.4 virtualenv. Run it directly:
   `./env/Scripts/python.exe`, `./env/Scripts/pip.exe`, `./env/Scripts/kanban.exe`.
+
+## Frontend (web/)
+
+The client is a Vite + Svelte app in `web/`.
+
+- Develop: `cd web && npm install && npm run dev`. Vite serves the app on its
+  dev port and proxies `/ws` to the Tornado server (default `http://localhost:8001`).
+- Ship: `cd web && npm run build` writes `web/dist`; run `usurpent.py` and
+  Tornado serves `web/dist` with an `index.html` fallback for client routes.
+
+Keep gameplay/behavior constants server-side in `config.py`; the client only
+renders what the server sends.
 
 ## Kanban board (planning artifact)
 

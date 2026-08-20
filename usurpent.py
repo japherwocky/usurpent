@@ -3,9 +3,7 @@ import tornado.ioloop
 import tornado.options
 import tornado.web
 from tornado import websocket
-from tornado.web import HTTPError
 from tornado.log import enable_pretty_logging
-from markdown import markdown
 from dotenv import load_dotenv
 from typing import Any
 
@@ -15,37 +13,44 @@ import db
 
 import os
 import logging
-import re
 import math
 import random
 import json
-join = os.path.join
-exists = os.path.exists
 
 # Load environment variables from .env file
 load_dotenv()
 
 
+def _set_security_headers(handler):
+    """Apply consistent security headers to a RequestHandler response."""
+    handler.set_header("X-Content-Type-Options", "nosniff")
+    handler.set_header("X-Frame-Options", "DENY")
+    handler.set_header("X-XSS-Protection", "1; mode=block")
+    handler.set_header("Referrer-Policy", "strict-origin-when-cross-origin")
+    handler.set_header(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "font-src 'self'; "
+        "connect-src 'self'",
+    )
+    # HSTS only in production (HTTPS).
+    if not handler.application.settings.get("debug"):
+        handler.set_header(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+
+
+WEB_DIST = os.path.join(os.path.dirname(__file__), "web", "dist")
+
+
 class BaseHandler(tornado.web.RequestHandler):
     """Base handler with security headers"""
-    
+
     def set_default_headers(self):
-        """Set security headers for all responses"""
-        self.set_header("X-Content-Type-Options", "nosniff")
-        self.set_header("X-Frame-Options", "DENY")
-        self.set_header("X-XSS-Protection", "1; mode=block")
-        self.set_header("Referrer-Policy", "strict-origin-when-cross-origin")
-        self.set_header("Content-Security-Policy", 
-                       "default-src 'self'; "
-                       "script-src 'self' 'unsafe-inline'; "
-                       "style-src 'self' 'unsafe-inline'; "
-                       "img-src 'self' data:; "
-                       "font-src 'self'; "
-                       "connect-src 'self'")
-        
-        # HSTS (only in production with HTTPS)
-        if not self.application.settings.get('debug'):
-            self.set_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        _set_security_headers(self)
 
 
 def _wrap_angle(angle):
@@ -319,16 +324,12 @@ class App (tornado.web.Application):
         
         settings: dict[str, Any] = dict(
             cookie_secret=cookie_secret,
-            template_path=os.path.join(os.path.dirname(__file__), "templates"),
-            static_path=os.path.join(os.path.dirname(__file__), "static"),
             debug=debug,
-            autoescape=None,  # disable autoescaping for our HTML docs
         )
 
         handlers = [
-            (r"/?$", Home),
             (r"/ws", GameWebSocketHandler),
-            (r"(?!\/static.*)(.*)/?", DocHandler),
+            (r"/(.*)", SpaStaticFileHandler, {"path": WEB_DIST, "default_filename": "index.html"}),
         ]
 
         super().__init__(handlers, **settings)
@@ -336,97 +337,25 @@ class App (tornado.web.Application):
         self.world.start()
 
 
-class Home(BaseHandler):
-    async def get(self):
-        try:
-            logging.info("Serving home page")
-            self.render('index.html', hello=True)
-        except Exception as e:
-            logging.error(f"Error serving home page: {e}")
-            raise HTTPError(500, "Internal server error")
+class SpaStaticFileHandler(tornado.web.StaticFileHandler):
+    """Serve the built Svelte SPA, falling back to index.html.
 
-
-class DocHandler(BaseHandler):
+    Unknown paths (client-side routes) resolve to index.html so the
+    frontend router can handle them.
     """
-        Main blog post handler.  Look in /docs/ for whatever
-        the request is trying for, render it as markdown
-    """
-    async def get(self, path):
-        try:
-            logging.info(f"Processing documentation request for: {path}")
-            
-            # Input validation and sanitization
-            if not path or not isinstance(path, str):
-                logging.warning(f"Invalid path parameter: {path}")
-                raise HTTPError(400, "Invalid path parameter")
-            
-            # Remove dangerous characters and patterns
-            sanitized_path = path.replace('..', '').replace('\\', '/').strip('/')
-            
-            # Validate path contains only safe characters
-            if not re.match(r'^[a-zA-Z0-9_\-/]+$', sanitized_path):
-                logging.warning(f"Path contains invalid characters: {sanitized_path}")
-                raise HTTPError(400, "Invalid path characters")
-            
-            # Ensure path stays within docs directory
-            base_path = 'docs'
-            full_path = os.path.normpath(os.path.join(base_path, sanitized_path))
-            
-            # Security check: ensure the resolved path is still within docs directory
-            if not full_path.startswith(os.path.abspath(base_path)):
-                logging.warning(f"Path traversal attempt detected: {path}")
-                raise HTTPError(403, "Access denied")
-            
-            txt = None
-            if exists(full_path) and os.path.isdir(full_path):
-                # a folder
-                lastname = os.path.split(full_path)[-1]
-                file_path = os.path.join(full_path, f'{lastname}.txt')
-                
-                # Additional security check for file path
-                if not file_path.startswith(os.path.abspath(base_path)):
-                    logging.warning(f"File path traversal attempt: {file_path}")
-                    raise HTTPError(403, "Access denied")
-                
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        txt = f.read()
-                except IOError as e:
-                    logging.error(f"Failed to read folder documentation {file_path}: {e}")
-                    raise HTTPError(500, "Failed to read documentation")
 
-            elif exists(full_path + '.txt'):
-                file_path = full_path + '.txt'
-                
-                # Security check for file path
-                if not file_path.startswith(os.path.abspath(base_path)):
-                    logging.warning(f"File path traversal attempt: {file_path}")
-                    raise HTTPError(403, "Access denied")
-                
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        txt = f.read()
-                except IOError as e:
-                    logging.error(f"Failed to read documentation {file_path}: {e}")
-                    raise HTTPError(500, "Failed to read documentation")
-            else:
-                logging.warning(f"Documentation not found: {full_path}")
-                raise HTTPError(404, "Documentation not found")
+    def initialize(self, path, default_filename="index.html"):
+        tornado.web.StaticFileHandler.initialize(self, path, default_filename=default_filename)
 
-            if not txt:
-                logging.warning(f"Empty documentation file: {full_path}")
-                raise HTTPError(404, "Documentation not found")
+    def set_default_headers(self):
+        _set_security_headers(self)
 
-            logging.debug(f"Successfully loaded documentation, length: {len(txt)}")
-            doc = markdown(txt)
-            self.render('legacy.html', doc=doc)
-            
-        except HTTPError:
-            # Re-raise HTTP errors as-is
-            raise
-        except Exception as e:
-            logging.error(f"Unexpected error processing documentation {path}: {e}")
-            raise HTTPError(500, "Internal server error")
+    def validate_absolute_path(self, root, absolute_path):
+        if not os.path.exists(absolute_path):
+            # Client-side route or missing asset -> serve the app shell.
+            default = self.default_filename or "index.html"
+            absolute_path = os.path.join(root, default)
+        return super().validate_absolute_path(root, absolute_path)
 
 
 def main():
