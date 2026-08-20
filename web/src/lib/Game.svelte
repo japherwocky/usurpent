@@ -134,12 +134,18 @@
       Math.abs(by1 - by0)
     );
 
-    // Food spawn region: a dashed circle centered on the map, drawn with a
-    // slight opacity so players can see where new food appears.
+    // Food spawn region: a filled, dashed circle centered on the map, drawn
+    // with a slight opacity so players can see where new food appears.
     if (game.foodSpawnRadius > 0) {
       const [ccx, ccy] = toScreen(game.mapW / 2, game.mapH / 2);
       const screenR = game.foodSpawnRadius * s;
       ctx.save();
+      // Subtle fill so the zone reads as a region, not just an outline.
+      ctx.fillStyle = 'rgba(90, 107, 125, 0.08)';
+      ctx.beginPath();
+      ctx.arc(ccx, ccy, screenR, 0, Math.PI * 2);
+      ctx.fill();
+      // Dashed border with slight opacity, drawn on top of the fill.
       ctx.globalAlpha = 0.25;
       ctx.strokeStyle = '#5a6b7d';
       ctx.lineWidth = 2;
