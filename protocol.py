@@ -20,6 +20,7 @@ FIELD_X = "x"
 FIELD_Y = "y"
 FIELD_MAP_WIDTH = "map_width"
 FIELD_MAP_HEIGHT = "map_height"
+FIELD_FOOD = "food"
 
 # Per-player fields inside a snapshot's player list.
 FIELD_ID = "id"

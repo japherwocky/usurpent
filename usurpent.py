@@ -61,6 +61,10 @@ class Player:
     def __init__(self, player_id, handler, x, y):
         self.id = player_id
         self.handler = handler
+        self.respawn(x, y)
+
+    def respawn(self, x, y):
+        """Reset to a live snake at (x, y). Used on spawn and after death."""
         self.x = x
         self.y = y
         self.heading = random.uniform(-math.pi, math.pi)
@@ -118,9 +122,13 @@ class World:
 
     def __init__(self):
         self.players = {}  # player_id -> Player
+        self.foods = {}    # food_id -> (x, y)
         self._next_id = 0
+        self._food_next = 0
         self.tick_count = 0
         self._callback = None
+        for _ in range(config.FOOD_COUNT):
+            self._spawn_food()
 
     def start(self):
         """Begin the simulation loop on the current IOLoop."""
@@ -132,12 +140,17 @@ class World:
         if self._callback is not None:
             self._callback.stop()
 
+    def _spawn_food(self):
+        self._food_next += 1
+        fid = str(self._food_next)
+        x = random.uniform(0.0, config.MAP_WIDTH)
+        y = random.uniform(0.0, config.MAP_HEIGHT)
+        self.foods[fid] = (x, y)
+
     def spawn_player(self, handler):
         self._next_id += 1
         player_id = str(self._next_id)
-        margin = config.INITIAL_TAIL_LENGTH * config.TAIL_SEGMENT_SPACING
-        x = random.uniform(margin, config.MAP_WIDTH - margin)
-        y = random.uniform(margin, config.MAP_HEIGHT - margin)
+        x, y = self._free_spot()
         player = Player(player_id, handler, x, y)
         self.players[player_id] = player
         handler.player_id = player_id
@@ -156,13 +169,73 @@ class World:
         self.tick_count += 1
         for player in self.players.values():
             player.step(dt)
+        self._handle_food()
+        self._handle_collisions()
         self._broadcast_snapshot()
+
+    def _free_spot(self):
+        margin = config.INITIAL_TAIL_LENGTH * config.TAIL_SEGMENT_SPACING
+        return (
+            random.uniform(margin, config.MAP_WIDTH - margin),
+            random.uniform(margin, config.MAP_HEIGHT - margin),
+        )
+
+    def _handle_food(self):
+        for player in self.players.values():
+            if not player.alive:
+                continue
+            for fid, (fx, fy) in list(self.foods.items()):
+                if math.hypot(player.x - fx, player.y - fy) < config.FOOD_PICKUP_RADIUS:
+                    del self.foods[fid]
+                    player.length += config.FOOD_GROWTH
+                    player.score += 1
+        while len(self.foods) < config.FOOD_COUNT:
+            self._spawn_food()
+
+    def _handle_collisions(self):
+        for player in self.players.values():
+            if not player.alive:
+                continue
+            for other in self.players.values():
+                if other is player or not other.alive:
+                    continue
+                hit = any(
+                    math.hypot(player.x - px, player.y - py) < config.COLLISION_RADIUS
+                    for (px, py) in other.points
+                )
+                if hit:
+                    self._kill_player(player)
+                    break
+
+    def _kill_player(self, player):
+        player.alive = False
+        logging.info(f"Player {player.id} died (score {player.score})")
+        tornado.ioloop.IOLoop.current().call_later(
+            config.RESPAWN_DELAY, self._respawn_player, player.id
+        )
+
+    def _respawn_player(self, player_id):
+        player = self.players.get(player_id)
+        if player is None or player.alive:
+            return
+        x, y = self._free_spot()
+        player.respawn(x, y)
+        logging.info(f"Player {player_id} respawned")
+
+    def _food_list(self):
+        return [
+            {protocol.FIELD_ID: fid,
+             protocol.FIELD_X: round(fx, 2),
+             protocol.FIELD_Y: round(fy, 2)}
+            for fid, (fx, fy) in self.foods.items()
+        ]
 
     def _snapshot(self):
         return {
             protocol.FIELD_TYPE: protocol.TYPE_SNAPSHOT,
             protocol.FIELD_TICK: self.tick_count,
             protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
+            protocol.FIELD_FOOD: self._food_list(),
         }
 
     def _welcome(self, self_id):
@@ -172,6 +245,7 @@ class World:
             protocol.FIELD_MAP_WIDTH: config.MAP_WIDTH,
             protocol.FIELD_MAP_HEIGHT: config.MAP_HEIGHT,
             protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
+            protocol.FIELD_FOOD: self._food_list(),
         }
 
     def _broadcast_snapshot(self):
@@ -184,8 +258,9 @@ class World:
 class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
     """Real-time game connection.
 
-    Step 3: spawns a Player on connect, accepts mouse-target input, and
-    receives 20 Hz snapshots from the World. Collisions/food land later.
+    Spawns a Player on connect, accepts mouse-target input, and receives
+    20 Hz snapshots from the World. Food, growth, collisions, and
+    death/respawn are handled server-side in World.
     """
 
     def open(self):

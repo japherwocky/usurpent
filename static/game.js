@@ -10,10 +10,11 @@ const WS_PROTO = location.protocol === "https:" ? "wss" : "ws";
 let ws = null;
 let selfId = null;
 let players = {};            // id -> last player dict from server
+let foods = [];             // last food list from server
 let MAP_W = 1000;            // updated from welcome (handles env overrides)
 let MAP_H = 1000;
 
-let scaleX, scaleY, gEnts, gParts, lineGen;
+let scaleX, scaleY, gEnts, gParts, gFood, lineGen;
 
 document.getElementById("cta").addEventListener("click", function () {
   document.getElementById("welcome").classList.add("hide");
@@ -44,6 +45,7 @@ function handleMessage(msg) {
     }
     players = {};
     msg.players.forEach((p) => (players[p.id] = p));
+    foods = msg.food || [];
     render();
   } else if (msg.type === "snapshot") {
     const ids = new Set(msg.players.map((p) => p.id));
@@ -51,6 +53,7 @@ function handleMessage(msg) {
     Object.keys(players).forEach((id) => {
       if (!ids.has(id)) delete players[id];
     });
+    foods = msg.food || [];
     render();
   }
 }
@@ -82,6 +85,7 @@ function mkScreen() {
     .y((d) => scaleY(d[1]));
 
   gParts = svg.append("g").attr("class", "particles");
+  gFood = svg.append("g").attr("class", "food");
   gEnts = svg.append("g").attr("class", "entities");
 
   // Particle background: slow rotating dots, purely cosmetic.
@@ -156,6 +160,23 @@ function render() {
     .attr("fill", (d) => colorFor(d.id))
     .attr("opacity", (d) => (d.alive ? 1 : 0.4));
 
+  sel.exit().remove();
+
+  renderFood();
+}
+
+function renderFood() {
+  const sel = gFood.selectAll("circle.food").data(foods, (d) => d.id);
+  sel
+    .enter()
+    .append("circle")
+    .attr("class", "food")
+    .attr("r", 5)
+    .merge(sel)
+    .attr("cx", (d) => scaleX(d.x))
+    .attr("cy", (d) => scaleY(d.y))
+    .attr("fill", "#ffd166")
+    .attr("opacity", 0.9);
   sel.exit().remove();
 }
 
