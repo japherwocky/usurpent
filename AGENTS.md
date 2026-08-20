@@ -59,7 +59,11 @@ any GET and echo it in the `X-XSRFToken` header on every API POST.
 - `GET /api/me` — `{guest: true}` or `{guest: false, username, high_score, games_played}`.
 
 Errors are JSON: `{"error": "..."}` with a matching status code (400/401/409/429).
-Anonymous guests play without a session (see #178 for WebSocket auth).
+Anonymous guests play without a session. The WebSocket (`/ws`) reads the same
+signed `user` cookie on connect: if present it binds the snake to that
+`Account` (and the welcome message reports `guest: false` + `username`); if
+absent the connection is an anonymous guest (`guest: true`). No separate WS
+token is used.
 
 ## Kanban board (planning artifact)
 

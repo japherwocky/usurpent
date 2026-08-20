@@ -135,6 +135,10 @@ class Player:
     def __init__(self, player_id, handler, x, y):
         self.id = player_id
         self.handler = handler
+        # Account linkage: None for anonymous guests. Used by #179 to persist
+        # stats back to the Account row on death/disconnect.
+        self.account_id = getattr(handler, "account_id", None)
+        self.username = getattr(handler, "username", None)
         self.respawn(x, y)
 
     def respawn(self, x, y):
@@ -188,6 +192,7 @@ class Player:
             protocol.FIELD_POINTS: [[round(px, 2), round(py, 2)] for px, py in self.points],
             protocol.FIELD_ALIVE: self.alive,
             protocol.FIELD_SCORE: self.score,
+            protocol.FIELD_USERNAME: self.username,
         }
 
 
@@ -229,7 +234,7 @@ class World:
         self.players[player_id] = player
         handler.player_id = player_id
         logging.info(f"Player {player_id} spawned (total: {len(self.players)})")
-        handler.write_message(self._welcome(player_id))
+        handler.write_message(self._welcome(player_id, player))
         self._broadcast_snapshot()
         return player_id
 
@@ -312,10 +317,12 @@ class World:
             protocol.FIELD_FOOD: self._food_list(),
         }
 
-    def _welcome(self, self_id):
+    def _welcome(self, self_id, player):
         return {
             protocol.FIELD_TYPE: protocol.TYPE_WELCOME,
             protocol.FIELD_SELF_ID: self_id,
+            protocol.FIELD_GUEST: player.account_id is None,
+            protocol.FIELD_USERNAME: player.username,
             protocol.FIELD_MAP_WIDTH: config.MAP_WIDTH,
             protocol.FIELD_MAP_HEIGHT: config.MAP_HEIGHT,
             protocol.FIELD_HEAD_SPEED: config.HEAD_SPEED,
@@ -345,6 +352,12 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
 
     def open(self, *args, **kwargs):
         self.player_id = None
+        # Bind to the logged-in account when a session cookie is present;
+        # otherwise this is an anonymous guest (allowed to play). The cookie
+        # is signed, so we trust it directly rather than re-authenticating.
+        account = self.current_account
+        self.account_id = account.id if account is not None else None
+        self.username = account.username if account is not None else None
         self.application.world.spawn_player(self)
 
     def on_message(self, message):
