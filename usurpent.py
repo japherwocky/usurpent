@@ -292,6 +292,13 @@ class World:
         for player in self.players.values():
             if not player.alive:
                 continue
+            # World border: die on contact rather than sliding along the edge
+            # (which made steering feel stuck). The head is clamped in step(),
+            # so reaching the bound means it is exactly at the wall.
+            if (player.x <= 0.0 or player.x >= config.MAP_WIDTH or
+                    player.y <= 0.0 or player.y >= config.MAP_HEIGHT):
+                self._kill_player(player)
+                continue
             for other in self.players.values():
                 if other is player or not other.alive:
                     continue
