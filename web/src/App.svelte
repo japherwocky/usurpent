@@ -1,5 +1,6 @@
 <script>
   import Auth from './lib/Auth.svelte';
+  import Game from './lib/Game.svelte';
 </script>
 
 <main>
@@ -8,9 +9,7 @@
     <Auth />
   </header>
 
-  <section class="stage">
-    <p>The game renderer lands in #182. You can register and sign in above.</p>
-  </section>
+  <Game />
 </main>
 
 <style>
@@ -31,12 +30,5 @@
     font-weight: 700;
     margin: 0;
     font-size: 1.4rem;
-  }
-  .stage {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #9fb0c0;
   }
 </style>

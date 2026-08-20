@@ -9,7 +9,9 @@ it runs a fixed-tick simulation and streams snapshots over WebSocket. Clients
 send only a mouse-target and render with local prediction/interpolation.
 
 Stack: Python 3.12 + Tornado (WebSocket server), Peewee + SQLite for accounts,
-vanilla JS + D3 on the client (being ported to Vite + Svelte — see board).
+Vite + Svelte on the client (game renderer in `web/src/lib/Game.svelte`, netcode
+in `web/src/lib/netcode.js`; Canvas 2D, same prediction/interpolation as the old
+D3 client).
 
 ## Project layout
 
@@ -24,9 +26,9 @@ vanilla JS + D3 on the client (being ported to Vite + Svelte — see board).
 - `web/` — Vite + Svelte frontend. Source in `web/src`, built to `web/dist`
   (gitignored). Tornado serves `web/dist` in production; Vite serves it and
   proxies `/ws` to the backend in development.
-- `templates/` + `static/game.js` — Pre-Svelte reference (vanilla D3 client and
-  entry page). Being retired as the renderer is ported in #182; kept as the port
-  source for now.
+- `templates/` + `static/game.js` — Retired vanilla D3 client and entry page.
+  The renderer was ported to Svelte in #182; these remain only as historical
+  reference and are no longer served.
 - `static/netcodedemo.html` — Standalone netcode teaching demo.
 - `pyrightconfig.json` — Points pyright at the venv (`venvPath`/`venv`). Do not
   set `pythonPath` there; it is not a valid pyright setting.
