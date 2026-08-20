@@ -25,6 +25,7 @@ FIELD_HEAD_SPEED = "head_speed"
 FIELD_MAX_TURN_RATE = "max_turn_rate"
 FIELD_TAIL_SPACING = "tail_spacing"
 FIELD_TICK_HZ = "tick_hz"
+FIELD_FOOD_SPAWN_RADIUS = "food_spawn_radius"
 
 # Per-player fields inside a snapshot's player list.
 FIELD_ID = "id"

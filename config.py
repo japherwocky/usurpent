@@ -45,8 +45,15 @@ INITIAL_TAIL_LENGTH = _env_int("USURPENT_INITIAL_TAIL_LENGTH", 20)
 
 # Food.
 FOOD_GROWTH = _env_int("USURPENT_FOOD_GROWTH", 5)
-FOOD_COUNT = _env_int("USURPENT_FOOD_COUNT", 30)
+FOOD_COUNT = _env_int("USURPENT_FOOD_COUNT", 30)               # initial seed at start
 FOOD_PICKUP_RADIUS = _env_float("USURPENT_FOOD_PICKUP_RADIUS", 14.0)
+
+# Continuous spawning: instead of a fixed pool that runs out, the server drops
+# new food on a timer inside a circle centered on the map. This keeps the game
+# going indefinitely.
+FOOD_SPAWN_INTERVAL = _env_float("USURPENT_FOOD_SPAWN_INTERVAL", 5.0)  # seconds
+FOOD_SPAWN_RADIUS = _env_int("USURPENT_FOOD_SPAWN_RADIUS", 4000)       # from map center
+FOOD_MAX = _env_int("USURPENT_FOOD_MAX", 1000)                         # cap to bound growth
 
 # Collisions.
 COLLISION_RADIUS = _env_float("USURPENT_COLLISION_RADIUS", 10.0)

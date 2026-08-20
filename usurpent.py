@@ -216,6 +216,7 @@ class World:
         self._next_id = 0
         self._food_next = 0
         self.tick_count = 0
+        self._food_spawn_acc = 0.0  # accumulator for timed food spawning
         self._callback = None
         for _ in range(config.FOOD_COUNT):
             self._spawn_food()
@@ -233,8 +234,14 @@ class World:
     def _spawn_food(self):
         self._food_next += 1
         fid = str(self._food_next)
-        x = random.uniform(0.0, config.MAP_WIDTH)
-        y = random.uniform(0.0, config.MAP_HEIGHT)
+        # Spawn inside a circle centered on the map so new food appears in a
+        # consistent, discoverable region (the client draws its border).
+        cx = config.MAP_WIDTH / 2.0
+        cy = config.MAP_HEIGHT / 2.0
+        r = config.FOOD_SPAWN_RADIUS * math.sqrt(random.random())
+        theta = random.uniform(0.0, 2.0 * math.pi)
+        x = cx + r * math.cos(theta)
+        y = cy + r * math.sin(theta)
         self.foods[fid] = (x, y)
 
     def spawn_player(self, handler):
@@ -264,9 +271,18 @@ class World:
         self.tick_count += 1
         for player in self.players.values():
             player.step(dt)
+        self._spawn_timer(dt)
         self._handle_food()
         self._handle_collisions()
         self._broadcast_snapshot()
+
+    def _spawn_timer(self, dt):
+        """Drop new food on a fixed interval to keep the world stocked."""
+        self._food_spawn_acc += dt
+        if self._food_spawn_acc >= config.FOOD_SPAWN_INTERVAL:
+            self._food_spawn_acc -= config.FOOD_SPAWN_INTERVAL
+            if len(self.foods) < config.FOOD_MAX:
+                self._spawn_food()
 
     def _free_spot(self):
         margin = config.INITIAL_TAIL_LENGTH * config.TAIL_SEGMENT_SPACING
@@ -285,8 +301,6 @@ class World:
                     player.length += config.FOOD_GROWTH
                     player.score += 1
                     player.session_food += 1
-        while len(self.foods) < config.FOOD_COUNT:
-            self._spawn_food()
 
     def _handle_collisions(self):
         for player in self.players.values():
@@ -373,6 +387,7 @@ class World:
             protocol.FIELD_MAX_TURN_RATE: config.MAX_TURN_RATE,
             protocol.FIELD_TAIL_SPACING: config.TAIL_SEGMENT_SPACING,
             protocol.FIELD_TICK_HZ: config.TICK_HZ,
+            protocol.FIELD_FOOD_SPAWN_RADIUS: config.FOOD_SPAWN_RADIUS,
             protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
             protocol.FIELD_FOOD: self._food_list(),
         }

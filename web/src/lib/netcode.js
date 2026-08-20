@@ -132,6 +132,7 @@ export class Game {
     this.lastSnapTime = 0;
     this.snapInterval = 50;
     this.selfTarget = { x: 0, y: 0 };
+    this.foodSpawnRadius = 0; // radius of the central food-spawn circle
     this.onScore = null; // (score:number) => void, called when self score changes
   }
 
@@ -145,6 +146,7 @@ export class Game {
     if (msg.max_turn_rate) this.sim.maxTurnRate = msg.max_turn_rate;
     if (msg.tail_spacing) this.sim.tailSpacing = msg.tail_spacing;
     if (msg.tick_hz) this.sim.tickHz = msg.tick_hz;
+    if (msg.food_spawn_radius) this.foodSpawnRadius = msg.food_spawn_radius;
     this.players = {};
     msg.players.forEach((p) => (this.players[p.id] = makeState(p, this.selfId)));
     this.foods = msg.food || [];

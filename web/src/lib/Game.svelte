@@ -134,6 +134,22 @@
       Math.abs(by1 - by0)
     );
 
+    // Food spawn region: a dashed circle centered on the map, drawn with a
+    // slight opacity so players can see where new food appears.
+    if (game.foodSpawnRadius > 0) {
+      const [ccx, ccy] = toScreen(game.mapW / 2, game.mapH / 2);
+      const screenR = game.foodSpawnRadius * s;
+      ctx.save();
+      ctx.globalAlpha = 0.25;
+      ctx.strokeStyle = '#5a6b7d';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath();
+      ctx.arc(ccx, ccy, screenR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Cosmetic rotating particle field (world-space, scrolls with camera).
     const a = (13 * Math.PI) / 180;
     const cos = Math.cos(a);
