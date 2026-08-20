@@ -104,10 +104,10 @@ If you prefer not to use the Makefile:
 
 ## Game Mechanics
 
-- **Entity Movement**: Your entity (colored circle) follows your mouse cursor with physics-based acceleration
+- **Entity Movement**: Your entity (colored circle with a trailing tail) steers toward your mouse cursor; the server caps turn rate so trails curve smoothly
 - **Particle System**: Background particles rotate and shift colors continuously
-- **Real-time Updates**: The game updates at ~30 FPS for smooth gameplay
-- **Coordinate System**: Uses a mathematical coordinate system with D3.js scaling
+- **Real-time Updates**: The server simulates at 20 Hz and broadcasts snapshots; the client glides between them
+- **Coordinate System**: A 1000×1000 logical map scaled to the viewport with D3.js
 
 ## Development
 
@@ -149,14 +149,13 @@ This demo is based on Gabriel Gambetta's fast-paced multiplayer series and provi
 
 ## Contributing
 
-This project appears to be abandoned but welcomes contributions. Areas for improvement:
-
-1. **Multiplayer functionality** - Currently single-player only
-2. **Collision detection** - Add entity interactions
-3. **Score system** - Track player progress
-4. **Game modes** - Different gameplay variations
-5. **Performance optimization** - Improve rendering efficiency
-6. **Mobile support** - Touch controls for mobile devices
+This project welcomes contributions. Current state and areas for improvement:
+1. **Multiplayer** - Real-time multiplayer works (WebSocket + server-authoritative simulation). Try it: run the server and open two browser tabs.
+2. **Collision detection** - Head-vs-other-body kills; own tail is ignored. Tune `COLLISION_RADIUS` in `config.py`.
+3. **Score system** - Food pickups increment score; resets on death.
+4. **Game modes** - Different gameplay variations (not yet built).
+5. **Performance optimization** - Snapshot broadcast is full-state; fine for < 20 players, delta-compress later if needed.
+6. **Mobile support** - Touch controls for mobile devices (not yet built).
 
 ## License
 

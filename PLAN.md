@@ -21,9 +21,11 @@
 - No license file.
 - `Makefile` uses `./env/bin/...` paths that don't exist on Windows (venv uses `Scripts/`). Either make it cross-platform or document Windows commands.
 
-## Phase 3 — MVP: one shared map with snake mechanics
+## Phase 3 — MVP: one shared map with snake mechanics ✅ COMPLETE
 
 **Scope**: a single shared map. Players join via WebSocket, move on the map, grow tails, collide. No rooms, no lobby, no accounts, no persistence. Server is authoritative; clients predict and reconcile.
+
+**Status**: Built and verified end-to-end (food seed, pickup/growth, collision death, respawn, food restock all confirmed against a running server). Code lives in `config.py`, `protocol.py`, `usurpent.py` (`World`/`Player`/`GameWebSocketHandler`), and `static/game.js`.
 
 ### Server (`usurpent.py`)
 
@@ -89,18 +91,30 @@ These get loaded from env (e.g. `USURPENT_MAP_WIDTH=1500`) with the defaults abo
 
 ### Concrete first steps
 
-1. Add `WebSocketHandler` skeleton + connect/disconnect logging.
-2. Define the JSON protocol constants in one place.
-3. World class with a tick loop (start with one player, broadcast to itself, log it).
-4. Hook client WS, replace mouse-follow with server-driven position.
-5. Add tail growth + food.
-6. Add collisions + death/respawn.
+1. ✅ Add `WebSocketHandler` skeleton + connect/disconnect logging.
+2. ✅ Define the JSON protocol constants in one place.
+3. ✅ World class with a tick loop (start with one player, broadcast to itself, log it).
+4. ✅ Hook client WS, replace mouse-follow with server-driven position.
+5. ✅ Add tail growth + food.
+6. ✅ Add collisions + death/respawn.
+
+### Deferred from the original client plan
+
+- **Client-side prediction for self** and **true interpolation for others**: the client currently renders server snapshots directly, gliding between them with 50 ms D3 transitions. Good enough at 20 Hz; add prediction/reconciliation if motion feels laggy.
+- **`world` field in welcome**: welcome carries `players` + `food` directly (no nested `world` wrapper). Minor wire-format difference from the early sketch.
 
 ## Risks
 
 - Tornado's `WebSocketHandler` is fine but undocumented-for-games; we'll be inventing patterns.
 - No persistence means restarts wipe state — fine for MVP, document it.
 - CSP currently allows `'unsafe-inline'` for scripts — we'll need to clean that up if we add a WebSocket client that doesn't need inline JS, but for MVP it's tolerable.
+
+## What's next (post-MVP, not started)
+
+- README still claims "single-player only" in Contributing — update it; multiplayer now works.
+- A smoke test in `tests/` (server boot + WS connect + one tick) so CI has a floor.
+- Client-side prediction / interpolation if feel demands it.
+- Rooms/lobbies, accounts, persistence, leaderboards, mobile/touch — all explicitly out of MVP scope.
 
 ## Next concrete step
 
