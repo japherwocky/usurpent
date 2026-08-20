@@ -6,6 +6,7 @@ reasoning behind each. No gameplay constant should be a bare literal
 elsewhere in the codebase -- import from here instead.
 """
 
+import logging
 import os
 
 
@@ -55,3 +56,31 @@ RESPAWN_DELAY = _env_float("USURPENT_RESPAWN_DELAY", 1.5)      # seconds
 
 # Persistence.
 DATABASE_PATH = os.getenv("USURPENT_DATABASE_PATH", "usurpent.db")
+
+
+# Auth / cookies.
+def cookie_secret(debug=False):
+    """The secret used to sign cookies (mirrors pearachute's convention).
+
+    Raises in production if COOKIE_SECRET was never set. A weak-but-present
+    value only warns: failing a deploy over secret length is worse than
+    saying so.
+    """
+    DEV_COOKIE_SECRET = "changemeplz-dev-only"
+    MIN_SECRET_LENGTH = 32
+
+    secret = os.getenv("COOKIE_SECRET", DEV_COOKIE_SECRET)
+
+    if secret == DEV_COOKIE_SECRET and not debug:
+        raise ValueError(
+            "COOKIE_SECRET environment variable must be set for production. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+
+    if not debug and len(secret) < MIN_SECRET_LENGTH:
+        logging.warning(
+            "COOKIE_SECRET is only %d characters; %d or more is recommended",
+            len(secret), MIN_SECRET_LENGTH,
+        )
+
+    return secret

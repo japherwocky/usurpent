@@ -24,6 +24,7 @@ def _utcnow():
 
 
 class Account(BaseModel):
+    id = peewee.AutoField()
     username = peewee.CharField(unique=True, max_length=32)
     password_hash = peewee.CharField()
     email = peewee.CharField(unique=True, null=True)

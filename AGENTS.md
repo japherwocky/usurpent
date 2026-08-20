@@ -46,6 +46,21 @@ The client is a Vite + Svelte app in `web/`.
 Keep gameplay/behavior constants server-side in `config.py`; the client only
 renders what the server sends.
 
+## HTTP API (auth)
+
+Auth uses Tornado secure cookies (`user` = signed account id) plus XSRF
+protection (`xsrf_cookies=True`). The SPA must read the `_xsrf` cookie set on
+any GET and echo it in the `X-XSRFToken` header on every API POST.
+
+- `POST /api/register` — body `{username, password, email?}` → `{ok, username}`.
+  Username 3-32 chars `[A-Za-z0-9_-]`; password >= 8 chars; email optional.
+- `POST /api/login` — body `{username, password}` → `{ok, username}`.
+- `POST /api/logout` — clears the session.
+- `GET /api/me` — `{guest: true}` or `{guest: false, username, high_score, games_played}`.
+
+Errors are JSON: `{"error": "..."}` with a matching status code (400/401/409/429).
+Anonymous guests play without a session (see #178 for WebSocket auth).
+
 ## Kanban board (planning artifact)
 
 The board is the live backlog. `PLAN.md` was deleted on purpose — plan here,

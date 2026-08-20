@@ -16,9 +16,53 @@ import logging
 import math
 import random
 import json
+import re
+import time
+from collections import defaultdict
 
 # Load environment variables from .env file
 load_dotenv()
+
+from models import Account
+
+
+# --- Auth input validation (mirrors pearachute's field caps) -------------
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _valid_username(username):
+    return isinstance(username, str) and bool(_USERNAME_RE.match(username))
+
+
+def _valid_password(password):
+    return isinstance(password, str) and len(password) >= 8
+
+
+def _valid_email(email):
+    return isinstance(email, str) and len(email) <= 320 and bool(_EMAIL_RE.match(email))
+
+
+class RateLimiter:
+    """In-memory, per-process throttle (mirrors pearachute's contact form).
+
+    Resets on restart and does not span multiple workers; it exists to blunt
+    a script, not to be an authority.
+    """
+
+    def __init__(self, max_events, window):
+        self.max_events = max_events
+        self.window = window
+        self._hits = defaultdict(list)
+
+    def check(self, key):
+        now = time.time()
+        recent = [t for t in self._hits[key] if now - t < self.window]
+        self._hits[key] = recent
+        if len(recent) >= self.max_events:
+            return False
+        recent.append(now)
+        return True
 
 
 def _set_security_headers(handler):
@@ -51,6 +95,29 @@ class BaseHandler(tornado.web.RequestHandler):
 
     def set_default_headers(self):
         _set_security_headers(self)
+
+    @property
+    def current_account(self):
+        """The logged-in Account, or None for a guest/anonymous session."""
+        raw = self.get_secure_cookie("user")
+        if raw is None:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        try:
+            account_id = int(raw)
+        except (ValueError, TypeError):
+            return None
+        return Account.get_or_none(Account.id == account_id)
+
+    def write_error(self, status_code, **kwargs):
+        """Errors are JSON here, not Tornado's HTML page (mirrors pearachute)."""
+        reason = "Something went wrong."
+        exc_info = kwargs.get("exc_info")
+        if exc_info and isinstance(exc_info[1], tornado.web.HTTPError):
+            reason = exc_info[1].log_message or reason
+        self.set_header("Content-Type", "application/json")
+        self.finish(json.dumps({"error": reason}))
 
 
 def _wrap_angle(angle):
@@ -306,6 +373,132 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
         return True
 
 
+class AuthHandler(BaseHandler):
+    """Base for JSON auth endpoints; errors are returned as JSON."""
+
+    def _json_body(self):
+        try:
+            return json.loads(self.request.body or b"{}")
+        except (ValueError, TypeError):
+            return None
+
+    def _set_session(self, account):
+        self.set_secure_cookie(
+            "user",
+            str(account.id),
+            httponly=True,
+            secure=not self.application.settings.get("debug"),
+            samesite="lax",
+        )
+
+
+class RegisterHandler(AuthHandler):
+    """Create an account and start a session. POST only."""
+
+    limiter = RateLimiter(max_events=5, window=3600)
+
+    def post(self):
+        if not self.limiter.check(self.request.remote_ip):
+            self.set_status(429)
+            self.write({"error": "Too many registration attempts. Try again later."})
+            return
+
+        body = self._json_body()
+        if body is None:
+            self.set_status(400)
+            self.write({"error": "Invalid JSON body."})
+            return
+
+        username = (body.get("username") or "").strip()
+        password = body.get("password") or ""
+        email = (body.get("email") or "").strip() or None
+
+        if not _valid_username(username):
+            self.set_status(400)
+            self.write({"error": "Username must be 3-32 chars: letters, numbers, _ or -."})
+            return
+        if not _valid_password(password):
+            self.set_status(400)
+            self.write({"error": "Password must be at least 8 characters."})
+            return
+        if email is not None and not _valid_email(email):
+            self.set_status(400)
+            self.write({"error": "Email address is not valid."})
+            return
+        if Account.select().where(Account.username == username).exists():
+            self.set_status(409)
+            self.write({"error": "Username already taken."})
+            return
+        if email is not None and Account.select().where(Account.email == email).exists():
+            self.set_status(409)
+            self.write({"error": "Email already registered."})
+            return
+
+        account = Account(username=username, email=email)
+        account.set_password(password)
+        account.save()
+        self._set_session(account)
+        self.write({"ok": True, "username": account.username})
+
+
+class LoginHandler(AuthHandler):
+    """Authenticate by username/password and start a session. POST only."""
+
+    limiter = RateLimiter(max_events=10, window=3600)
+
+    def post(self):
+        if not self.limiter.check(self.request.remote_ip):
+            self.set_status(429)
+            self.write({"error": "Too many login attempts. Try again later."})
+            return
+
+        body = self._json_body()
+        if body is None:
+            self.set_status(400)
+            self.write({"error": "Invalid JSON body."})
+            return
+
+        username = (body.get("username") or "").strip()
+        password = body.get("password") or ""
+        if not username or not password:
+            self.set_status(400)
+            self.write({"error": "Username and password are required."})
+            return
+
+        account = Account.get_or_none(Account.username == username)
+        if account is None or not account.check_password(password):
+            self.set_status(401)
+            self.write({"error": "Invalid username or password."})
+            return
+
+        self._set_session(account)
+        self.write({"ok": True, "username": account.username})
+
+
+class LogoutHandler(AuthHandler):
+    """End the current session. POST only."""
+
+    def post(self):
+        self.clear_cookie("user")
+        self.write({"ok": True})
+
+
+class SessionHandler(AuthHandler):
+    """Report the current session: a registered account or a guest. GET only."""
+
+    def get(self):
+        account = self.current_account
+        if account is None:
+            self.write({"guest": True})
+            return
+        self.write({
+            "guest": False,
+            "username": account.username,
+            "high_score": account.high_score,
+            "games_played": account.games_played,
+        })
+
+
 class App (tornado.web.Application):
     world: World
 
@@ -316,18 +509,17 @@ class App (tornado.web.Application):
         # Ensure the database and tables exist before serving anything.
         db.init_db()
 
-        # Get cookie secret from environment or generate a warning
-        cookie_secret = os.getenv('COOKIE_SECRET')
-        if not cookie_secret or cookie_secret == 'changemeplz':
-            logging.warning("Using default cookie secret! Set COOKIE_SECRET in .env for production.")
-            cookie_secret = "changemeplz"  # fallback for development
-        
         settings: dict[str, Any] = dict(
-            cookie_secret=cookie_secret,
+            cookie_secret=config.cookie_secret(debug=debug),
+            xsrf_cookies=True,
             debug=debug,
         )
 
         handlers = [
+            (r"/api/register$", RegisterHandler),
+            (r"/api/login$", LoginHandler),
+            (r"/api/logout$", LogoutHandler),
+            (r"/api/me$", SessionHandler),
             (r"/ws", GameWebSocketHandler),
             (r"/(.*)", SpaStaticFileHandler, {"path": WEB_DIST, "default_filename": "index.html"}),
         ]
@@ -346,6 +538,14 @@ class SpaStaticFileHandler(tornado.web.StaticFileHandler):
 
     def initialize(self, path, default_filename="index.html"):
         tornado.web.StaticFileHandler.initialize(self, path, default_filename=default_filename)
+
+    async def get(self, path, include_body=True):
+        # Touching xsrf_token sets the _xsrf cookie, which the SPA reads back
+        # out and echoes in the X-XSRFToken header when it POSTs. Without this
+        # nothing ever sets the cookie, and every API POST is rejected.
+        if not path.startswith(("assets/",)):
+            self.xsrf_token
+        await super().get(path, include_body)
 
     def set_default_headers(self):
         _set_security_headers(self)
