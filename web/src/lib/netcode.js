@@ -9,7 +9,8 @@
 // This module is framework-agnostic; the Svelte component drives it: it feeds
 // welcome/snapshot messages in and reads renderList()/alpha() out each frame.
 
-const SIM = { headSpeed: 120, maxTurnRate: 6.0, tailSpacing: 8, tickHz: 20 };
+const SIM = { headSpeed: 120, maxTurnRate: 8.4, tailSpacing: 8, tickHz: 20,
+  baseGirth: 6, maxGirth: 24, turnGirthFalloff: 0.4 };
 
 export const PALETTE = [
   '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
@@ -48,6 +49,7 @@ function cloneLocal(p) {
     heading: p.heading,
     points: p.points.map((pt) => [pt[0], pt[1]]),
     cap: p.points.length,
+    girth: p.girth,
   };
 }
 
@@ -68,6 +70,7 @@ function reconcileLocal(st) {
   st.local.heading = st.server.heading;
   st.local.points = st.server.points.map((pt) => [pt[0], pt[1]]);
   st.local.cap = st.server.points.length;
+  st.local.girth = st.server.girth;
 }
 
 function stepLocal(local, dt, target, mapW, mapH, sim) {
@@ -80,7 +83,13 @@ function stepLocal(local, dt, target, mapW, mapH, sim) {
     desired = Math.atan2(target.y, target.x);
   }
   const diff = wrapAngle(desired - local.heading);
-  const maxStep = sim.maxTurnRate * dt;
+  // Match the server: turn rate falls off as the snake gets girthier, so a
+  // fat snake has a wider turning radius. Keeps local prediction in sync.
+  const g = local.girth || sim.baseGirth;
+  let frac = (g - sim.baseGirth) / (sim.maxGirth - sim.baseGirth);
+  frac = Math.max(0, Math.min(1, frac));
+  const effTurn = sim.maxTurnRate * (1 - sim.turnGirthFalloff * frac);
+  const maxStep = effTurn * dt;
   local.heading += Math.max(-maxStep, Math.min(maxStep, diff));
 
   local.x += Math.cos(local.heading) * sim.headSpeed * dt;
@@ -149,6 +158,9 @@ export class Game {
     if (msg.tail_spacing) this.sim.tailSpacing = msg.tail_spacing;
     if (msg.tick_hz) this.sim.tickHz = msg.tick_hz;
     if (msg.food_spawn_radius) this.foodSpawnRadius = msg.food_spawn_radius;
+    if (msg.base_girth) this.sim.baseGirth = msg.base_girth;
+    if (msg.max_girth) this.sim.maxGirth = msg.max_girth;
+    if (msg.turn_girth_falloff !== undefined) this.sim.turnGirthFalloff = msg.turn_girth_falloff;
     this.players = {};
     msg.players.forEach((p) => (this.players[p.id] = makeState(p, this.selfId)));
     this.foods = msg.food || [];

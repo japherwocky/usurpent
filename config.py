@@ -37,7 +37,8 @@ MAP_HEIGHT = _env_int("USURPENT_MAP_HEIGHT", 10000)
 # Server simulation.
 TICK_HZ = _env_int("USURPENT_TICK_HZ", 20)
 HEAD_SPEED = _env_float("USURPENT_HEAD_SPEED", 80.0)           # units / second
-MAX_TURN_RATE = _env_float("USURPENT_MAX_TURN_RATE", 6.0)      # radians / second
+MAX_TURN_RATE = _env_float("USURPENT_MAX_TURN_RATE", 8.4)      # radians / second (base)
+TURN_GIRTH_FALLOFF = _env_float("USURPENT_TURN_GIRTH_FALLOFF", 0.4)  # max turn-rate loss at MAX_GIRTH
 
 # Tail shape.
 TAIL_SEGMENT_SPACING = _env_float("USURPENT_TAIL_SEGMENT_SPACING", 8.0)
@@ -54,9 +55,9 @@ MAX_GIRTH = _env_float("USURPENT_MAX_GIRTH", 24.0)
 # Each pellet carries a radius and a value; bigger pellets are worth more
 # (value = round(radius / FOOD_RADIUS_PER_VALUE), minimum 1). Eating a pellet
 # adds `value` to score and `value * FOOD_GROWTH` to tail length.
-FOOD_GROWTH = _env_int("USURPENT_FOOD_GROWTH", 5)              # tail length per value point
+FOOD_GROWTH = _env_int("USURPENT_FOOD_GROWTH", 2)              # tail length per value point
 FOOD_COUNT = _env_int("USURPENT_FOOD_COUNT", 30)               # initial seed at start
-FOOD_BASE_RADIUS = _env_float("USURPENT_FOOD_BASE_RADIUS", 10.0)
+FOOD_BASE_RADIUS = _env_float("USURPENT_FOOD_BASE_RADIUS", 5.0)
 FOOD_RADIUS_PER_VALUE = _env_float("USURPENT_FOOD_RADIUS_PER_VALUE", 10.0)
 FOOD_PICKUP_PAD = _env_float("USURPENT_FOOD_PICKUP_PAD", 10.0) # added to pellet radius for pickup
 
@@ -69,7 +70,7 @@ FOOD_MAX = _env_int("USURPENT_FOOD_MAX", 1000)                         # cap to 
 
 # Death: a slain serpent leaves a carcass of food pellets -- one per body
 # segment, sized from its girth. Dropped pellets render at lower opacity.
-DROP_RADIUS_FACTOR = _env_float("USURPENT_DROP_RADIUS_FACTOR", 0.8)    # carcass radius = girth * this
+DROP_RADIUS_FACTOR = _env_float("USURPENT_DROP_RADIUS_FACTOR", 0.4)    # carcass radius = girth * this
 CARCASS_MAX_PELLETS = _env_int("USURPENT_CARCASS_MAX_PELLETS", 400)    # sample if longer
 
 # Collisions. A head dies if it enters (attacker girth + defender girth) of any

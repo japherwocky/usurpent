@@ -191,7 +191,7 @@ class Player:
         else:
             desired = math.atan2(ty, tx)  # target is a direction vector
         diff = _wrap_angle(desired - self.heading)
-        max_step = config.MAX_TURN_RATE * dt
+        max_step = self._turn_rate() * dt
         self.heading += max(-max_step, min(max_step, diff))
 
         self.x += math.cos(self.heading) * config.HEAD_SPEED * dt
@@ -204,6 +204,16 @@ class Player:
             self.points.append((self.x, self.y))
             while len(self.points) > self.length:
                 self.points.pop(0)
+
+    def _turn_rate(self):
+        """Max steering rate for this snake. Bigger girth -> wider turning
+        radius, so the rate falls off toward MAX_GIRTH (capped loss)."""
+        rate = config.MAX_TURN_RATE
+        if self.girth > config.BASE_GIRTH:
+            frac = (self.girth - config.BASE_GIRTH) / (config.MAX_GIRTH - config.BASE_GIRTH)
+            frac = max(0.0, min(1.0, frac))
+            rate *= 1.0 - config.TURN_GIRTH_FALLOFF * frac
+        return max(0.1, rate)
 
     def to_dict(self):
         return {
@@ -438,6 +448,9 @@ class World:
             protocol.FIELD_TAIL_SPACING: config.TAIL_SEGMENT_SPACING,
             protocol.FIELD_TICK_HZ: config.TICK_HZ,
             protocol.FIELD_FOOD_SPAWN_RADIUS: config.FOOD_SPAWN_RADIUS,
+            protocol.FIELD_BASE_GIRTH: config.BASE_GIRTH,
+            protocol.FIELD_MAX_GIRTH: config.MAX_GIRTH,
+            protocol.FIELD_TURN_GIRTH_FALLOFF: config.TURN_GIRTH_FALLOFF,
             protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
             protocol.FIELD_FOOD: self._food_list(),
         }
