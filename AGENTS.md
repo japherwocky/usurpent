@@ -10,8 +10,9 @@ send only a mouse-target and render with local prediction/interpolation.
 
 Stack: Python 3.12 + Tornado (WebSocket server), Peewee + SQLite for accounts,
 Vite + Svelte on the client (game renderer in `web/src/lib/Game.svelte`, netcode
-in `web/src/lib/netcode.js`; Canvas 2D, same prediction/interpolation as the old
-D3 client).
+in `web/src/lib/netcode.js`; Canvas 2D, head-centered camera, same
+prediction/interpolation as the old D3 client). Clients send a steering
+direction (mouse offset from screen center), not a world target.
 
 ## Project layout
 

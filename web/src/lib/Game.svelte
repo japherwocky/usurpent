@@ -14,6 +14,10 @@
   let dpr = 1;
   let particles = [];
 
+  // World units visible across the smaller viewport axis. Smaller = more zoom
+  // and a stronger "scrolling" feel.
+  const VIEW_WORLD = 600;
+
   function mkParticles() {
     const arr = [];
     for (let i = 0; i < 13; i++) {
@@ -49,9 +53,9 @@
     };
   }
 
-  function sendTarget(lx, ly) {
+  function sendTarget(dx, dy) {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'input', target: { x: lx, y: ly } }));
+      ws.send(JSON.stringify({ type: 'input', target: { x: dx, y: dy } }));
     }
   }
 
@@ -61,13 +65,12 @@
     const my = e.clientY - rect.top;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
-    const sx = w / game.mapW;
-    const sy = h / game.mapH;
-    // Logical y is "up positive" (matches the server's display flip).
-    const lx = mx / sx;
-    const ly = (h - my) / sy;
-    game.selfTarget = { x: lx, y: ly };
-    sendTarget(lx, ly);
+    // Mouse offset from screen center is the steering direction. Screen y is
+    // down-positive; world y is up-positive, so flip it.
+    const dx = mx - w / 2;
+    const dy = -(my - h / 2);
+    game.selfTarget = { x: dx, y: dy };
+    sendTarget(dx, dy);
   }
 
   function draw() {
@@ -82,13 +85,37 @@
       canvas.width = bw;
       canvas.height = bh;
     }
-
-    const sx = w / game.mapW;
-    const sy = h / game.mapH;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    // Cosmetic rotating particle field.
+    // Camera follows the self head (clamped to map bounds).
+    const s = Math.min(w, h) / VIEW_WORLD;
+    const viewW = w / s;
+    const viewH = h / s;
+
+    const list = game.renderList(game.alpha(performance.now()));
+    const selfEnt = list.find((p) => p.id === game.selfId);
+    let camX = game.mapW / 2;
+    let camY = game.mapH / 2;
+    if (selfEnt) {
+      camX = selfEnt.x;
+      camY = selfEnt.y;
+    }
+    camX =
+      viewW < game.mapW
+        ? Math.max(viewW / 2, Math.min(game.mapW - viewW / 2, camX))
+        : game.mapW / 2;
+    camY =
+      viewH < game.mapH
+        ? Math.max(viewH / 2, Math.min(game.mapH - viewH / 2, camY))
+        : game.mapH / 2;
+
+    const toScreen = (wx, wy) => [
+      (wx - camX) * s + w / 2,
+      h / 2 - (wy - camY) * s,
+    ];
+
+    // Cosmetic rotating particle field (world-space, scrolls with camera).
     const a = (13 * Math.PI) / 180;
     const cos = Math.cos(a);
     const sin = Math.sin(a);
@@ -98,8 +125,9 @@
       const ny = cos * (p.y - p.ty) - sin * (p.x - p.tx) + p.ty;
       p.x = nx;
       p.y = ny;
+      const [px, py] = toScreen(p.x, p.y);
       ctx.beginPath();
-      ctx.arc(p.x * sx, h - p.y * sy, p.r, 0, Math.PI * 2);
+      ctx.arc(px, py, p.r, 0, Math.PI * 2);
       ctx.fillStyle = PALETTE[p.color % PALETTE.length];
       ctx.fill();
     }
@@ -108,22 +136,20 @@
     // Food.
     ctx.fillStyle = '#ffd166';
     for (const f of game.foods) {
+      const [fx, fy] = toScreen(f.x, f.y);
       ctx.beginPath();
-      ctx.arc(f.x * sx, h - f.y * sy, 5, 0, Math.PI * 2);
+      ctx.arc(fx, fy, 5, 0, Math.PI * 2);
       ctx.fill();
     }
 
     // Snakes.
-    const now = performance.now();
-    const alpha = game.alpha(now);
-    for (const pl of game.renderList(alpha)) {
+    for (const pl of list) {
       const col = colorFor(pl.id);
 
       if (pl.points && pl.points.length) {
         ctx.beginPath();
         for (let i = 0; i < pl.points.length; i++) {
-          const px = pl.points[i][0] * sx;
-          const py = h - pl.points[i][1] * sy;
+          const [px, py] = toScreen(pl.points[i][0], pl.points[i][1]);
           if (i === 0) ctx.moveTo(px, py);
           else ctx.lineTo(px, py);
         }
@@ -135,8 +161,9 @@
         ctx.stroke();
       }
 
+      const [hx, hy] = toScreen(pl.x, pl.y);
       ctx.beginPath();
-      ctx.arc(pl.x * sx, h - pl.y * sy, 7 + Math.min(pl.score, 30) * 0.2, 0, Math.PI * 2);
+      ctx.arc(hx, hy, 7 + Math.min(pl.score, 30) * 0.2, 0, Math.PI * 2);
       ctx.fillStyle = col;
       ctx.globalAlpha = pl.alive ? 1 : 0.4;
       ctx.fill();
@@ -146,7 +173,7 @@
         ctx.fillStyle = '#e6edf3';
         ctx.font = '11px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(pl.username, pl.x * sx, h - pl.y * sy - 12);
+        ctx.fillText(pl.username, hx, hy - 12);
       }
     }
     ctx.globalAlpha = 1;
@@ -163,7 +190,7 @@
   }
 
   onMount(() => {
-    game.onScore = (s) => (selfScore = s);
+    game.onScore = (sc) => (selfScore = sc);
     connect();
     lastFrame = performance.now();
     raf = requestAnimationFrame(loop);

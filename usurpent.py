@@ -149,7 +149,9 @@ class Player:
         self.x = x
         self.y = y
         self.heading = random.uniform(-math.pi, math.pi)
-        self.target = (x, y)
+        # Initial steering direction matches the spawn heading so the snake
+        # sets off straight. Clients later send a direction vector (dx, dy).
+        self.target = (math.cos(self.heading), math.sin(self.heading))
         self.alive = True
         self.score = 0
         # New life: not yet persisted. session_food is intentionally kept so
@@ -173,7 +175,10 @@ class Player:
         if not self.alive:
             return
         tx, ty = self.target
-        desired = math.atan2(ty - self.y, tx - self.x)
+        if tx == 0 and ty == 0:
+            desired = self.heading  # no input: keep going straight
+        else:
+            desired = math.atan2(ty, tx)  # target is a direction vector
         diff = _wrap_angle(desired - self.heading)
         max_step = config.MAX_TURN_RATE * dt
         self.heading += max(-max_step, min(max_step, diff))

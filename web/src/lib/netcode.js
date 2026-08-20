@@ -71,7 +71,14 @@ function reconcileLocal(st) {
 }
 
 function stepLocal(local, dt, target, mapW, mapH, sim) {
-  const desired = Math.atan2(target.y - local.y, target.x - local.x);
+  // target is a direction vector (dx, dy), not a world point: steer toward
+  // that absolute heading so holding a direction yields a straight path.
+  let desired;
+  if (target.x === 0 && target.y === 0) {
+    desired = local.heading; // no input: keep current heading
+  } else {
+    desired = Math.atan2(target.y, target.x);
+  }
   const diff = wrapAngle(desired - local.heading);
   const maxStep = sim.maxTurnRate * dt;
   local.heading += Math.max(-maxStep, Math.min(maxStep, diff));
