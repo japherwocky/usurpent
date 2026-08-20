@@ -14,7 +14,8 @@
 
 <style>
   main {
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
   }
