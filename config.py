@@ -31,12 +31,12 @@ def _env_float(name, default):
 
 
 # Map geometry (logical units, scaled to viewport on the client).
-MAP_WIDTH = _env_int("USURPENT_MAP_WIDTH", 1000)
-MAP_HEIGHT = _env_int("USURPENT_MAP_HEIGHT", 1000)
+MAP_WIDTH = _env_int("USURPENT_MAP_WIDTH", 10000)
+MAP_HEIGHT = _env_int("USURPENT_MAP_HEIGHT", 10000)
 
 # Server simulation.
 TICK_HZ = _env_int("USURPENT_TICK_HZ", 20)
-HEAD_SPEED = _env_float("USURPENT_HEAD_SPEED", 120.0)          # units / second
+HEAD_SPEED = _env_float("USURPENT_HEAD_SPEED", 80.0)           # units / second
 MAX_TURN_RATE = _env_float("USURPENT_MAX_TURN_RATE", 6.0)      # radians / second
 
 # Tail shape.
