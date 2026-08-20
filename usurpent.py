@@ -10,6 +10,7 @@ from typing import Any
 import config
 import protocol
 import db
+from bots import REGISTRY
 
 import os
 import logging
@@ -149,6 +150,9 @@ class Player:
         # stats back to the Account row on death/disconnect.
         self.account_id = getattr(handler, "account_id", None)
         self.username = getattr(handler, "username", None)
+        # Bot flag and AI brain. Humans are not bots and have strategy=None.
+        self.is_bot = False
+        self.strategy = None
         # Food eaten across this whole session (all lives); persists across
         # respawns. Per-life score lives in self.score (reset on respawn).
         self.session_food = 0
@@ -236,6 +240,8 @@ class Player:
             protocol.FIELD_GIRTH: round(self.girth, 2),
             protocol.FIELD_LENGTH: round(self.length, 1),
             protocol.FIELD_USERNAME: self.username,
+            protocol.FIELD_IS_BOT: self.is_bot,
+            protocol.FIELD_STRATEGY: self.strategy.name if self.strategy else None,
         }
 
 
@@ -250,8 +256,15 @@ class World:
         self.tick_count = 0
         self._food_spawn_acc = 0.0  # accumulator for timed food spawning
         self._callback = None
+        self._bot_seq = 0
         for _ in range(config.FOOD_COUNT):
             self._spawn_food()
+        # Populate the arena with AI bots so humans have opponents from the
+        # first moment. Strategies are assigned round-robin from REGISTRY so
+        # different AIs compete head-to-head.
+        for i in range(config.BOT_COUNT):
+            strategy_cls = REGISTRY[i % len(REGISTRY)]
+            self.spawn_bot(strategy_cls)
 
     def start(self):
         """Begin the simulation loop on the current IOLoop."""
@@ -310,10 +323,28 @@ class World:
         logging.info(f"Player {player_id} removed (total: {len(self.players)})")
         self._broadcast_snapshot()
 
+    def spawn_bot(self, strategy_cls):
+        """Create an AI-controlled Player (no WebSocket handler)."""
+        self._next_id += 1
+        player_id = str(self._next_id)
+        self._bot_seq += 1
+        x, y = self._free_spot()
+        player = Player(player_id, None, x, y)
+        player.is_bot = True
+        player.strategy = strategy_cls()
+        player.username = f"Bot-{self._bot_seq}"
+        self.players[player_id] = player
+        logging.info(
+            f"Bot {player_id} ({player.username}, {player.strategy.name}) spawned"
+        )
+        return player_id
+
     def tick(self):
         dt = 1.0 / config.TICK_HZ
         self.tick_count += 1
         for player in self.players.values():
+            if player.is_bot and player.alive and player.strategy is not None:
+                player.strategy.think(self, player)
             player.step(dt)
         self._spawn_timer(dt)
         self._handle_food()

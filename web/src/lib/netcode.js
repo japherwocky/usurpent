@@ -18,6 +18,14 @@ export const PALETTE = [
   '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
 ];
 
+// Bots are colored by their strategy so different AIs are easy to tell apart
+// (and you can watch them compete). Humans keep the random PALETTE via
+// colorFor(id). Keys match the `strategy` field sent by the server.
+export const STRATEGY_COLORS = {
+  seeker: '#ff4d6d',
+  wanderer: '#4dd2ff',
+};
+
 export function colorFor(id) {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
@@ -121,6 +129,8 @@ function renderState(st, alpha) {
       score: st.server.score,
       girth: st.server.girth,
       username: st.server.username,
+      is_bot: st.server.is_bot,
+      strategy: st.server.strategy,
     };
   }
   if (!st.prev) return st.server;
@@ -134,6 +144,8 @@ function renderState(st, alpha) {
     score: st.server.score,
     girth: st.server.girth,
     username: st.server.username,
+    is_bot: st.server.is_bot,
+    strategy: st.server.strategy,
   };
 }
 

@@ -77,6 +77,15 @@ FOOD_MAX = _env_int("USURPENT_FOOD_MAX", 1000)                         # cap to 
 DROP_RADIUS_FACTOR = _env_float("USURPENT_DROP_RADIUS_FACTOR", 0.4)    # carcass radius = girth * this
 CARCASS_MAX_PELLETS = _env_int("USURPENT_CARCASS_MAX_PELLETS", 400)    # sample if longer
 
+# Bots: server-side AI snakes that play alongside humans. Each bot runs a
+# "strategy" (see bots.py) so different AIs can compete. BOT_COUNT is the
+# number of bots at start; they respawn automatically to keep the count
+# constant. The steering knobs below tune how cautiously bots move.
+BOT_COUNT = _env_int("USURPENT_BOT_COUNT", 6)                  # bots at start
+BOT_WALL_MARGIN = _env_float("USURPENT_BOT_WALL_MARGIN", 300.0)    # steer to center this close to an edge
+BOT_AVOID_RADIUS = _env_float("USURPENT_BOT_AVOID_RADIUS", 120.0)  # body-avoidance sense radius
+BOT_AVOID_WEIGHT = _env_float("USURPENT_BOT_AVOID_WEIGHT", 4000.0) # how strongly bodies push bots away
+
 # Collisions. A head dies if it enters (attacker girth + defender girth) of any
 # body point of another snake. Self-collision is intentionally off.
 

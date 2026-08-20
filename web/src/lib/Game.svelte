@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { Game, colorFor, PALETTE } from './netcode.js';
+  import { Game, colorFor, PALETTE, STRATEGY_COLORS } from './netcode.js';
 
   let canvas;
   let status = 'connecting';
@@ -189,7 +189,10 @@
     // Snakes. Each body segment is a circle of radius `girth`, stroked so the
     // overlapping circles read as a scaling tube. The head is drawn on top.
     for (const pl of list) {
-      const col = colorFor(pl.id);
+      // Bots are colored by their strategy; humans keep a random palette color.
+      const col = pl.is_bot && pl.strategy && STRATEGY_COLORS[pl.strategy]
+        ? STRATEGY_COLORS[pl.strategy]
+        : colorFor(pl.id);
       const girthPx = (pl.girth || 6) * s;
 
       ctx.globalAlpha = pl.alive ? 1 : 0.3;
