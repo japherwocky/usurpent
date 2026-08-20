@@ -32,11 +32,13 @@ USURPENT is a real-time multiplayer game where players control entities that mov
 
 ```
 usurpent/
-├── usurpent.py          # Main Tornado application server
+├── usurpent.py          # Main Tornado application server + WebSocket handler
+├── config.py            # Gameplay tuning knobs (env-overridable, no magic numbers)
+├── protocol.py          # WebSocket message types and field names
 ├── requirements.txt     # Python dependencies
 ├── Makefile            # Build and development commands
 ├── static/
-│   ├── game.js         # Frontend game logic
+│   ├── game.js         # Frontend game logic (WS client, prediction, rendering)
 │   └── netcodedemo.html # Network demo implementation
 ├── templates/
 │   └── index.html      # Main game interface
