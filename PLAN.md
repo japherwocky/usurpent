@@ -1,222 +1,93 @@
-# USURPENT Dependency Update & Modernization Plan
+# USURPENT Plan
 
-## Progress Summary
+## Where we are
 
-**Phase 1 Status: 95% Complete** ✅
-- ✅ Dependencies updated (tornado>=6.5.0, markdown>=3.8.0)
-- ✅ Python 3 compatibility issues fixed (unicode, tests import, print statements)
-- ✅ Tornado API updated (super() constructor)
-- ✅ Missing template created (legacy.html)
-- ✅ Server functionality verified (main page, static files, docs)
-- ✅ DocHandler tested and working (markdown rendering)
+- **Phase 1 & 2**: Complete (Python 3, Tornado 6, security headers, env config).
+- **Current state**: Single-player visual demo. Server serves `index.html` + `game.js`, plus a markdown doc handler under `/docs/*`. No real networking between players despite the README claims — `game.js` runs purely client-side and `netcodedemo.html` is a standalone teaching file.
+- **Goal of this plan**: Figure out what we actually want to ship next. We're starting that conversation, not promising dates.
 
-**Remaining Phase 1 Tasks:**
-- Minor request handler method updates (if needed)
-- HTTPError usage verification (if needed)
+## What's done (don't re-litigate)
 
-## Current State Analysis
+- Python 2 → 3 migration, Tornado API modernization.
+- `requirements.txt` pinned (`tornado>=6.5.0`, `markdown>=3.8.0`, `python-dotenv`).
+- Security headers + path-traversal hardening in `DocHandler`.
+- Cookie secret via env var.
+- `.env` / `.env.example` workflow.
 
-### Dependencies
-- **Current**: `tornado` (unspecified version), `markdown` (imported but not in requirements.txt)
-- **Environment**: Python 3.12.4, Tornado 6.5.1 (latest: 6.5.2)
-- **Status**: Python 2 codebase requiring migration to Python 3
+## What's still loose ends (small, do opportunistically)
 
-### Critical Issues Identified
-1. Missing `markdown` in requirements.txt
-2. Python 2→3 compatibility issues
-3. Outdated Tornado API usage
-4. Missing template file (`legacy.html`)
-5. Missing tests module
+- No tests anywhere — `tests/` is referenced but doesn't exist. Even a smoke test for `usurpent.py` startup + doc route would help.
+- `README.md` overpromises "real-time multiplayer" and claims a "Network Architecture" demo. README should match reality.
+- No license file.
+- `Makefile` uses `./env/bin/...` paths that don't exist on Windows (venv uses `Scripts/`). Either make it cross-platform or document Windows commands.
 
-## Implementation Plan
+## Phase 3 — MVP: one shared map with snake mechanics
 
-### Phase 1: Critical Fixes (2-4 hours) ✅ **COMPLETED**
-**Goal**: Get the application running with modern dependencies
+**Scope**: a single shared map. Players join via WebSocket, move on the map, grow tails, collide. No rooms, no lobby, no accounts, no persistence. Server is authoritative; clients predict and reconcile.
 
-#### 1.1 Update Dependencies
-- [x] Fix `requirements.txt`:
-  ```txt
-  tornado>=6.5.0
-  markdown>=3.8.0
-  ```
+### Server (`usurpent.py`)
 
-#### 1.2 Python 3 Compatibility
-- [x] Replace `unicode(txt, 'utf-8')` with `str(txt, 'utf-8')` (line 66)
-- [x] Fix print statements to use `print()` function
-- [x] Update exception handling syntax
-- [x] Fix integer division behavior
-- [x] Remove or implement missing `tests` module (line 80)
+- `GameWebSocketHandler` (Tornado `WebSocketHandler`).
+- One `World` instance holding players + their tails, ticked at 20 Hz.
+- Player input = target direction (or mouse target — decide during build).
+- Server simulates: position, tail growth on food pickup, head-vs-tail collisions, head-vs-head collisions.
+- On connect: assign id, spawn at free spot, send `welcome` with current world snapshot.
+- On disconnect: remove player, broadcast updated snapshot.
+- Broadcast: full snapshot per tick is fine at MVP scale (< 20 players).
 
-#### 1.3 Tornado API Updates
-- [x] Fix Application constructor parameters (line 38)
-- [x] Update request handler methods to modern API (async/await)
-- [x] Fix HTTPError usage
+### Protocol (JSON over WS)
 
-#### 1.4 Missing Files
-- [x] Create `templates/legacy.html` or fix template reference
-- [x] Verify all static files are present
+- Client → server: `{ "type": "input", "target": {x, y} }` (mouse target in logical map coords).
+- Server → client: `{ "type": "welcome", "self_id": "...", "world": {...} }` on connect.
+- Server → client: `{ "type": "snapshot", "tick": N, "players": [...] }` at ~20 Hz.
+- Keep it boring. No delta compression, no binary, in MVP.
 
-#### 1.5 Testing
-- [x] Test server startup
-- [x] Test basic page rendering
-- [x] Verify static file serving
+### Client (`static/game.js`)
 
-### Phase 2: Modernization (1-2 days) ✅ **COMPLETED**
-**Goal**: Modernize codebase and improve structure
+- Open WS, render server-authoritative positions (drop the mouse-follow physics for *other* players; keep it for self-prediction).
+- Client-side prediction: move self locally on input, reconcile against snapshot.
+- Interpolate other players between snapshots.
+- Render tails as polylines, head as circle (reuse the existing circle styling).
+- Food: small dots, one type, respawn on pickup.
 
-#### 2.1 Code Quality
-- [x] Add proper error handling
-- [x] Implement logging configuration
-- [x] Skip type hints (per preference)
-- [x] Update import statements
-- [x] Remove deprecated code patterns
+### Collisions (MVP rule set)
 
-#### 2.2 Security & Configuration
-- [x] Move cookie secret to environment variable
-- [ ] Add CSRF protection back
-- [x] Implement proper input validation
-- [x] Add security headers
+- Head vs. own tail: ignore (you can't kill yourself on your own trail in MVP — revisit later).
+- Head vs. any other player's body: death. Snake resets.
+- Head vs. food: grow by N segments, score++.
+- Out-of-bounds: clamp to map edges.
 
-#### 2.3 Frontend Improvements
-- [ ] Add `package.json` for frontend dependencies
-- [ ] Modernize JavaScript to ES6+ modules
-- [ ] Add build process (webpack/vite)
-- [ ] Update D3.js usage to modern patterns
+### Out of scope for MVP (explicitly)
 
-#### 2.4 Documentation
-- [ ] Update API documentation
-- [ ] Add development setup guide
-- [ ] Document configuration options
-- [ ] Add deployment instructions
+- Multiple rooms / lobbies.
+- Accounts, persistence, leaderboards.
+- Power-ups, varied food, obstacles.
+- Mobile/touch.
+- Anti-cheat beyond server authority.
 
-### Phase 3: Feature Enhancement (1-2 weeks)
-**Goal**: Implement proper multiplayer functionality
+### Open questions to settle before coding
 
-#### 3.1 Real-time Communication
-- [ ] Add WebSocket support
-- [ ] Implement player state synchronization
-- [ ] Add room/session management
-- [ ] Implement connection handling
+- ~~**Input model**: absolute mouse target vs. discrete direction.~~ **Decided: mouse target.** Player sets a target point; the head steers toward it. Smooth curves, circular motion, and the existing demo UX carries over. Tradeoff: "snake" is more aesthetic than arcade — collisions matter less because you can't dart sharply. We'll lean into that — make trails long and curvy, collisions about positioning rather than twitch.
+- **Map size**: fixed? viewport-relative? Start with a fixed `1000 x 1000` logical map, scaled to viewport.
+- **Growth rate**: how many segments per food?
+- **Death feedback**: respawn instantly, or short delay with a "you died" overlay?
+- **Steering model**: pure "head chases target" vs. "head has a max turn rate." Max turn rate matters because otherwise a mouse flick can flip the head 180° and skip the trail. Suggest: cap angular velocity, so the trail gets to follow the arc.
 
-#### 3.2 Game Logic
-- [ ] Add collision detection
-- [ ] Implement scoring system
-- [ ] Add game state management
-- [ ] Create game lobby system
+### Concrete first steps
 
-#### 3.3 Performance & Scaling
-- [ ] Optimize rendering performance
-- [ ] Add connection pooling
-- [ ] Implement rate limiting
-- [ ] Add monitoring/metrics
+1. Add `WebSocketHandler` skeleton + connect/disconnect logging.
+2. Define the JSON protocol constants in one place.
+3. World class with a tick loop (start with one player, broadcast to itself, log it).
+4. Hook client WS, replace mouse-follow with server-driven position.
+5. Add tail growth + food.
+6. Add collisions + death/respawn.
 
-#### 3.4 Testing & CI/CD
-- [ ] Add unit tests
-- [ ] Add integration tests
-- [ ] Set up CI/CD pipeline
-- [ ] Add automated testing
+## Risks
 
-## Technical Details
+- Tornado's `WebSocketHandler` is fine but undocumented-for-games; we'll be inventing patterns.
+- No persistence means restarts wipe state — fine for MVP, document it.
+- CSP currently allows `'unsafe-inline'` for scripts — we'll need to clean that up if we add a WebSocket client that doesn't need inline JS, but for MVP it's tolerable.
 
-### Specific Code Changes Required
+## Next concrete step
 
-#### usurpent.py
-```python
-# Line 66: Fix unicode usage
-doc = markdown(str(txt, 'utf-8'))  # was: markdown(unicode(txt, 'utf-8'))
-
-# Line 38: Fix Tornado Application constructor
-tornado.web.Application.__init__(self, handlers, **settings)
-
-# Line 80: Fix tests import
-if options.runtests:
-    import unittest
-    import sys
-    sys.argv = ['usurpent.py', ]
-    # unittest.main('tests')  # Commented out until tests exist
-    print("Tests not implemented yet")
-    return
-```
-
-#### requirements.txt
-```txt
-tornado>=6.5.0
-markdown>=3.8.0
-```
-
-#### templates/legacy.html (if needed)
-```html
-<!DOCTYPE html>
-<html>
-<head>
-    <title>USURPENT - Documentation</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .content { max-width: 800px; margin: 0 auto; }
-    </style>
-</head>
-<body>
-    <div class="content">
-        {{ doc }}
-    </div>
-</body>
-</html>
-```
-
-## Risk Assessment
-
-### High Risk
-- Python 2→3 migration may introduce subtle bugs
-- Tornado API changes might break existing functionality
-- Missing templates could cause runtime errors
-
-### Medium Risk
-- Frontend modernization may affect game performance
-- WebSocket implementation complexity
-
-### Low Risk
-- Dependency updates
-- Documentation improvements
-- Testing framework addition
-
-## Success Criteria
-
-### Phase 1 Success ✅
-- [x] Server starts without errors
-- [x] Main page loads correctly
-- [x] Static files serve properly
-- [x] Basic game interface works
-
-### Phase 2 Success ✅
-- [x] All Python 3 compatibility issues resolved
-- [x] Modern development workflow established
-- [x] Security improvements implemented
-- [x] Code quality improved
-
-### Phase 3 Success
-- [ ] Multiplayer functionality working
-- [ ] Real-time synchronization stable
-- [ ] Performance acceptable for multiple players
-- [ ] Testing coverage adequate
-
-## Timeline
-
-- **Week 1**: Phase 1 completion
-- **Week 2**: Phase 2 completion  
-- **Weeks 3-4**: Phase 3 completion
-
-## Resources Needed
-
-- Development environment with Python 3.9+
-- Testing environment for multiplayer simulation
-- Code review process for security changes
-- Documentation time for updated features
-
-## Next Steps
-
-1. Start with Phase 1.1 - Update requirements.txt
-2. Test current application to document all errors
-3. Fix Python 3 compatibility issues systematically
-4. Verify each fix before moving to the next
-
-This plan provides a structured approach to modernizing USURPENT while maintaining its core functionality and improving its architecture for future development.
+Settle the remaining open questions (map size, growth rate, death feedback, max turn rate). Then I start with step 1: the WebSocket handler skeleton.
