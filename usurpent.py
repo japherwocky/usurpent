@@ -7,6 +7,7 @@ from tornado.web import HTTPError
 from tornado.log import enable_pretty_logging
 from markdown import markdown
 from dotenv import load_dotenv
+from typing import Any
 
 import config
 import protocol
@@ -268,7 +269,9 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
     death/respawn are handled server-side in World.
     """
 
-    def open(self):
+    application: "App"
+
+    def open(self, *args, **kwargs):
         self.player_id = None
         self.application.world.spawn_player(self)
 
@@ -299,6 +302,8 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
 
 
 class App (tornado.web.Application):
+    world: World
+
     def __init__(self, debug=False):
         """
         Settings for our application
@@ -312,7 +317,7 @@ class App (tornado.web.Application):
             logging.warning("Using default cookie secret! Set COOKIE_SECRET in .env for production.")
             cookie_secret = "changemeplz"  # fallback for development
         
-        settings = dict(
+        settings: dict[str, Any] = dict(
             cookie_secret=cookie_secret,
             template_path=os.path.join(os.path.dirname(__file__), "templates"),
             static_path=os.path.join(os.path.dirname(__file__), "static"),

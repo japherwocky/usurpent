@@ -1,7 +1,8 @@
 {
-  "pythonPath": "./env/Scripts/python.exe",
-  "include": ["usurpent.py", "static"],
-  "exclude": ["env", "__pycache__", ".git"],
+  "venvPath": ".",
+  "venv": "env",
+  "include": ["."],
+  "exclude": ["env", "__pycache__", ".git", "node_modules"],
   "reportMissingImports": "error",
   "reportMissingTypeStubs": "none"
 }
