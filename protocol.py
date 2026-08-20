@@ -18,6 +18,8 @@ FIELD_PLAYERS = "players"
 FIELD_TARGET = "target"
 FIELD_X = "x"
 FIELD_Y = "y"
+FIELD_MAP_WIDTH = "map_width"
+FIELD_MAP_HEIGHT = "map_height"
 
 # Per-player fields inside a snapshot's player list.
 FIELD_ID = "id"

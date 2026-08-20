@@ -169,6 +169,8 @@ class World:
         return {
             protocol.FIELD_TYPE: protocol.TYPE_WELCOME,
             protocol.FIELD_SELF_ID: self_id,
+            protocol.FIELD_MAP_WIDTH: config.MAP_WIDTH,
+            protocol.FIELD_MAP_HEIGHT: config.MAP_HEIGHT,
             protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
         }
 
