@@ -174,39 +174,42 @@
     }
     ctx.globalAlpha = 1;
 
-    // Food.
-    ctx.fillStyle = '#ffd166';
+    // Food. Pellets carry a radius; dropped (carcass) pellets render at lower
+    // opacity so they read differently from spawned food.
     for (const f of game.foods) {
       const [fx, fy] = toScreen(f.x, f.y);
+      ctx.globalAlpha = f.dropped ? 0.61 : 1.0;
+      ctx.fillStyle = '#ffd166';
       ctx.beginPath();
-      ctx.arc(fx, fy, 5, 0, Math.PI * 2);
+      ctx.arc(fx, fy, (f.r || 10) * s, 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.globalAlpha = 1;
 
-    // Snakes.
+    // Snakes. Each body segment is a circle of radius `girth`, stroked so the
+    // overlapping circles read as a scaling tube. The head is drawn on top.
     for (const pl of list) {
       const col = colorFor(pl.id);
+      const girthPx = (pl.girth || 6) * s;
 
+      ctx.globalAlpha = pl.alive ? 1 : 0.3;
+      ctx.fillStyle = col;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+      ctx.lineWidth = 1;
       if (pl.points && pl.points.length) {
-        ctx.beginPath();
-        for (let i = 0; i < pl.points.length; i++) {
-          const [px, py] = toScreen(pl.points[i][0], pl.points[i][1]);
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
+        for (const pt of pl.points) {
+          const [px, py] = toScreen(pt[0], pt[1]);
+          ctx.beginPath();
+          ctx.arc(px, py, girthPx, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
         }
-        ctx.strokeStyle = col;
-        ctx.lineWidth = 6;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.globalAlpha = pl.alive ? 0.9 : 0.25;
-        ctx.stroke();
       }
 
       const [hx, hy] = toScreen(pl.x, pl.y);
       ctx.beginPath();
-      ctx.arc(hx, hy, 7 + Math.min(pl.score, 30) * 0.2, 0, Math.PI * 2);
+      ctx.arc(hx, hy, girthPx, 0, Math.PI * 2);
       ctx.fillStyle = col;
-      ctx.globalAlpha = pl.alive ? 1 : 0.4;
       ctx.fill();
 
       if (pl.username) {
@@ -214,7 +217,7 @@
         ctx.fillStyle = '#e6edf3';
         ctx.font = '11px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(pl.username, hx, hy - 12);
+        ctx.fillText(pl.username, hx, hy - girthPx - 4);
       }
     }
     ctx.globalAlpha = 1;

@@ -129,6 +129,16 @@ def _wrap_angle(angle):
     return angle
 
 
+def _girth_for_score(score):
+    """Body radius (world units) for a given life score, capped."""
+    return min(config.MAX_GIRTH, config.BASE_GIRTH + score * config.GIRTH_PER_FOOD)
+
+
+def _value_for_radius(radius):
+    """Pellet value from its radius: bigger pellets are worth more."""
+    return max(1, round(radius / config.FOOD_RADIUS_PER_VALUE))
+
+
 class Player:
     """One snake on the map. Server-authoritative state only."""
 
@@ -158,6 +168,7 @@ class Player:
         # food from prior lives in this session still counts.
         self.life_persisted = False
         self.length = config.INITIAL_TAIL_LENGTH
+        self.girth = _girth_for_score(0)
         # Seed the trail as a line behind the head so it renders as a snake.
         back_x = -math.cos(self.heading)
         back_y = -math.sin(self.heading)
@@ -203,6 +214,7 @@ class Player:
             protocol.FIELD_POINTS: [[round(px, 2), round(py, 2)] for px, py in self.points],
             protocol.FIELD_ALIVE: self.alive,
             protocol.FIELD_SCORE: self.score,
+            protocol.FIELD_GIRTH: round(self.girth, 2),
             protocol.FIELD_USERNAME: self.username,
         }
 
@@ -231,9 +243,20 @@ class World:
         if self._callback is not None:
             self._callback.stop()
 
-    def _spawn_food(self):
+    def _make_food(self, x, y, radius, value, dropped):
+        """Store one pellet. Foods are dicts so per-pellet radius/value/dropped
+        can vary (spawned vs. carcass)."""
         self._food_next += 1
         fid = str(self._food_next)
+        self.foods[fid] = {
+            "x": x,
+            "y": y,
+            "r": radius,
+            "value": value,
+            "dropped": dropped,
+        }
+
+    def _spawn_food(self):
         # Spawn inside a circle centered on the map so new food appears in a
         # consistent, discoverable region (the client draws its border).
         cx = config.MAP_WIDTH / 2.0
@@ -242,7 +265,8 @@ class World:
         theta = random.uniform(0.0, 2.0 * math.pi)
         x = cx + r * math.cos(theta)
         y = cy + r * math.sin(theta)
-        self.foods[fid] = (x, y)
+        radius = config.FOOD_BASE_RADIUS
+        self._make_food(x, y, radius, _value_for_radius(radius), False)
 
     def spawn_player(self, handler):
         self._next_id += 1
@@ -295,12 +319,14 @@ class World:
         for player in self.players.values():
             if not player.alive:
                 continue
-            for fid, (fx, fy) in list(self.foods.items()):
-                if math.hypot(player.x - fx, player.y - fy) < config.FOOD_PICKUP_RADIUS:
+            for fid, food in list(self.foods.items()):
+                fx, fy = food["x"], food["y"]
+                if math.hypot(player.x - fx, player.y - fy) < (food["r"] + config.FOOD_PICKUP_PAD):
                     del self.foods[fid]
-                    player.length += config.FOOD_GROWTH
-                    player.score += 1
+                    player.score += food["value"]
+                    player.length += food["value"] * config.FOOD_GROWTH
                     player.session_food += 1
+                    player.girth = _girth_for_score(player.score)
 
     def _handle_collisions(self):
         for player in self.players.values():
@@ -316,8 +342,12 @@ class World:
             for other in self.players.values():
                 if other is player or not other.alive:
                     continue
+                # Die if the head enters (attacker girth + defender girth) of
+                # any body point. Bigger snakes are both bulkier and easier to
+                # clip, so girth matters in both directions.
                 hit = any(
-                    math.hypot(player.x - px, player.y - py) < config.COLLISION_RADIUS
+                    math.hypot(player.x - px, player.y - py)
+                    < (player.girth + other.girth)
                     for (px, py) in other.points
                 )
                 if hit:
@@ -327,11 +357,29 @@ class World:
     def _kill_player(self, player):
         player.alive = False
         logging.info(f"Player died (score {player.score})")
-        # Record this life's stats now; the respawn that follows starts fresh.
+        # Leave a carcass of food where the body fell, then record stats.
+        self._drop_carcass(player)
         self._persist_life(player)
         tornado.ioloop.IOLoop.current().call_later(
             config.RESPAWN_DELAY, self._respawn_player, player.id
         )
+
+    def _drop_carcass(self, player):
+        """Scatter food pellets along the dead serpent's body -- one per
+        segment, sized from its girth. Dropped pellets render at low opacity."""
+        drop_r = player.girth * config.DROP_RADIUS_FACTOR
+        value = _value_for_radius(drop_r)
+        pts = player.points
+        # One pellet per segment; if the carcass is enormous, sample evenly so
+        # we don't flood the world with food.
+        if len(pts) > config.CARCASS_MAX_PELLETS:
+            step = len(pts) / config.CARCASS_MAX_PELLETS
+            indices = range(0, len(pts), max(1, int(step)))
+        else:
+            indices = range(len(pts))
+        for i in indices:
+            px, py = pts[i]
+            self._make_food(px, py, drop_r, value, True)
 
     def _persist_life(self, player):
         """Write one life's stats to the linked Account (no-op for guests).
@@ -362,9 +410,11 @@ class World:
     def _food_list(self):
         return [
             {protocol.FIELD_ID: fid,
-             protocol.FIELD_X: round(fx, 2),
-             protocol.FIELD_Y: round(fy, 2)}
-            for fid, (fx, fy) in self.foods.items()
+             protocol.FIELD_X: round(f["x"], 2),
+             protocol.FIELD_Y: round(f["y"], 2),
+             protocol.FIELD_FOOD_RADIUS: round(f["r"], 2),
+             protocol.FIELD_FOOD_DROPPED: f["dropped"]}
+            for fid, f in self.foods.items()
         ]
 
     def _snapshot(self):

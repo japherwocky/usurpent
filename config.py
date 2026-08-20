@@ -43,10 +43,22 @@ MAX_TURN_RATE = _env_float("USURPENT_MAX_TURN_RATE", 6.0)      # radians / secon
 TAIL_SEGMENT_SPACING = _env_float("USURPENT_TAIL_SEGMENT_SPACING", 8.0)
 INITIAL_TAIL_LENGTH = _env_int("USURPENT_INITIAL_TAIL_LENGTH", 20)
 
+# Body girth: the snake's thickness in world units. It grows as the snake eats
+# and caps at MAX_GIRTH. Girth drives both the rendered body size and the
+# collision size, so bigger snakes are bulkier and easier to hit.
+BASE_GIRTH = _env_float("USURPENT_BASE_GIRTH", 6.0)
+GIRTH_PER_FOOD = _env_float("USURPENT_GIRTH_PER_FOOD", 0.4)
+MAX_GIRTH = _env_float("USURPENT_MAX_GIRTH", 24.0)
+
 # Food.
-FOOD_GROWTH = _env_int("USURPENT_FOOD_GROWTH", 5)
+# Each pellet carries a radius and a value; bigger pellets are worth more
+# (value = round(radius / FOOD_RADIUS_PER_VALUE), minimum 1). Eating a pellet
+# adds `value` to score and `value * FOOD_GROWTH` to tail length.
+FOOD_GROWTH = _env_int("USURPENT_FOOD_GROWTH", 5)              # tail length per value point
 FOOD_COUNT = _env_int("USURPENT_FOOD_COUNT", 30)               # initial seed at start
-FOOD_PICKUP_RADIUS = _env_float("USURPENT_FOOD_PICKUP_RADIUS", 14.0)
+FOOD_BASE_RADIUS = _env_float("USURPENT_FOOD_BASE_RADIUS", 10.0)
+FOOD_RADIUS_PER_VALUE = _env_float("USURPENT_FOOD_RADIUS_PER_VALUE", 10.0)
+FOOD_PICKUP_PAD = _env_float("USURPENT_FOOD_PICKUP_PAD", 10.0) # added to pellet radius for pickup
 
 # Continuous spawning: instead of a fixed pool that runs out, the server drops
 # new food on a timer inside a circle centered on the map. This keeps the game
@@ -55,8 +67,13 @@ FOOD_SPAWN_INTERVAL = _env_float("USURPENT_FOOD_SPAWN_INTERVAL", 5.0)  # seconds
 FOOD_SPAWN_RADIUS = _env_int("USURPENT_FOOD_SPAWN_RADIUS", 4000)       # from map center
 FOOD_MAX = _env_int("USURPENT_FOOD_MAX", 1000)                         # cap to bound growth
 
-# Collisions.
-COLLISION_RADIUS = _env_float("USURPENT_COLLISION_RADIUS", 10.0)
+# Death: a slain serpent leaves a carcass of food pellets -- one per body
+# segment, sized from its girth. Dropped pellets render at lower opacity.
+DROP_RADIUS_FACTOR = _env_float("USURPENT_DROP_RADIUS_FACTOR", 0.8)    # carcass radius = girth * this
+CARCASS_MAX_PELLETS = _env_int("USURPENT_CARCASS_MAX_PELLETS", 400)    # sample if longer
+
+# Collisions. A head dies if it enters (attacker girth + defender girth) of any
+# body point of another snake. Self-collision is intentionally off.
 
 # Lifecycle.
 RESPAWN_DELAY = _env_float("USURPENT_RESPAWN_DELAY", 1.5)      # seconds

@@ -105,6 +105,7 @@ function renderState(st, alpha) {
       points: st.local.points,
       alive: st.server.alive,
       score: st.server.score,
+      girth: st.server.girth,
       username: st.server.username,
     };
   }
@@ -117,6 +118,7 @@ function renderState(st, alpha) {
     points: interpPoints(st.prev.points, st.server.points, alpha),
     alive: st.server.alive,
     score: st.server.score,
+    girth: st.server.girth,
     username: st.server.username,
   };
 }
