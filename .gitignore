@@ -11,6 +11,7 @@ node_modules
 
 # default dev datastore
 data.db
+*.db
 
 #OS X noise
 .DS_Store

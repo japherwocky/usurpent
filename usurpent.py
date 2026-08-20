@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 import config
 import protocol
+import db
 
 import os
 import logging
@@ -302,6 +303,9 @@ class App (tornado.web.Application):
         """
         Settings for our application
         """
+        # Ensure the database and tables exist before serving anything.
+        db.init_db()
+
         # Get cookie secret from environment or generate a warning
         cookie_secret = os.getenv('COOKIE_SECRET')
         if not cookie_secret or cookie_secret == 'changemeplz':

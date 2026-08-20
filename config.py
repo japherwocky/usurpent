@@ -52,3 +52,6 @@ COLLISION_RADIUS = _env_float("USURPENT_COLLISION_RADIUS", 10.0)
 
 # Lifecycle.
 RESPAWN_DELAY = _env_float("USURPENT_RESPAWN_DELAY", 1.5)      # seconds
+
+# Persistence.
+DATABASE_PATH = os.getenv("USURPENT_DATABASE_PATH", "usurpent.db")
