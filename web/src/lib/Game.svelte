@@ -13,6 +13,11 @@
   let lastFrame = 0;
   let dpr = 1;
   let particles = [];
+  // On-screen position of the self head, refreshed each frame. Steering is
+  // computed relative to this (not the screen center) so it stays correct
+  // when the camera isn't centered on the head (e.g. wide viewports).
+  let headScreenX = 0;
+  let headScreenY = 0;
 
   // World units visible across the smaller viewport axis. Smaller = more zoom
   // and a stronger "scrolling" feel.
@@ -63,12 +68,12 @@
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    // Mouse offset from screen center is the steering direction. Screen y is
-    // down-positive; world y is up-positive, so flip it.
-    const dx = mx - w / 2;
-    const dy = -(my - h / 2);
+    // Steering direction is the mouse offset from the SERPENT HEAD's on-screen
+    // position, not the screen center. The head is centered while the camera
+    // follows it, but on wide viewports the whole map is shown and the head
+    // sits elsewhere, so using screen center would steer incorrectly.
+    const dx = mx - headScreenX;
+    const dy = -(my - headScreenY);
     game.selfTarget = { x: dx, y: dy };
     sendTarget(dx, dy);
   }
@@ -107,6 +112,15 @@
       (wx - camX) * s + w / 2,
       h / 2 - (wy - camY) * s,
     ];
+
+    if (selfEnt) {
+      const [hsx, hsy] = toScreen(selfEnt.x, selfEnt.y);
+      headScreenX = hsx;
+      headScreenY = hsy;
+    } else {
+      headScreenX = w / 2;
+      headScreenY = h / 2;
+    }
 
     // Map border, so the playfield bounds are visible as the world scrolls.
     const [bx0, by0] = toScreen(0, 0);
