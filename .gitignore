@@ -27,3 +27,7 @@ keys.py
 
 # whatever vscode is doing
 .vscode
+
+# local QA artifacts
+qa.log
+qa_check.py
