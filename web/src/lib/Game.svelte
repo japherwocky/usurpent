@@ -88,32 +88,37 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    // Camera follows the self head (clamped to map bounds).
+    // Camera centers on the self head so it stays put on screen and the map
+    // scrolls underneath. Only fall back to centering the whole map when the
+    // viewport is large enough to show it entirely (otherwise the head is
+    // always centered, in both axes).
     const s = Math.min(w, h) / VIEW_WORLD;
     const viewW = w / s;
     const viewH = h / s;
 
     const list = game.renderList(game.alpha(performance.now()));
     const selfEnt = list.find((p) => p.id === game.selfId);
-    let camX = game.mapW / 2;
-    let camY = game.mapH / 2;
-    if (selfEnt) {
-      camX = selfEnt.x;
-      camY = selfEnt.y;
-    }
-    camX =
-      viewW < game.mapW
-        ? Math.max(viewW / 2, Math.min(game.mapW - viewW / 2, camX))
-        : game.mapW / 2;
-    camY =
-      viewH < game.mapH
-        ? Math.max(viewH / 2, Math.min(game.mapH - viewH / 2, camY))
-        : game.mapH / 2;
+    let camX = selfEnt ? selfEnt.x : game.mapW / 2;
+    let camY = selfEnt ? selfEnt.y : game.mapH / 2;
+    if (viewW >= game.mapW) camX = game.mapW / 2;
+    if (viewH >= game.mapH) camY = game.mapH / 2;
 
     const toScreen = (wx, wy) => [
       (wx - camX) * s + w / 2,
       h / 2 - (wy - camY) * s,
     ];
+
+    // Map border, so the playfield bounds are visible as the world scrolls.
+    const [bx0, by0] = toScreen(0, 0);
+    const [bx1, by1] = toScreen(game.mapW, game.mapH);
+    ctx.strokeStyle = '#3a4654';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(
+      Math.min(bx0, bx1),
+      Math.min(by0, by1),
+      Math.abs(bx1 - bx0),
+      Math.abs(by1 - by0)
+    );
 
     // Cosmetic rotating particle field (world-space, scrolls with camera).
     const a = (13 * Math.PI) / 180;
