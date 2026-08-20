@@ -39,6 +39,9 @@ TICK_HZ = _env_int("USURPENT_TICK_HZ", 20)
 HEAD_SPEED = _env_float("USURPENT_HEAD_SPEED", 80.0)           # units / second
 MAX_TURN_RATE = _env_float("USURPENT_MAX_TURN_RATE", 8.4)      # radians / second (base)
 TURN_GIRTH_FALLOFF = _env_float("USURPENT_TURN_GIRTH_FALLOFF", 0.4)  # max turn-rate loss at MAX_GIRTH
+# Boost: holding the boost control raises head speed by this factor. No cost
+# yet -- a natural follow-up is to drain length/score while boosting.
+BOOST_MULTIPLIER = _env_float("USURPENT_BOOST_MULTIPLIER", 1.8)
 
 # Tail shape. `length` is a world-length target; the spacing between rendered
 # segments scales with girth so circles overlap into a connected tube at every

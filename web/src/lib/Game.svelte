@@ -7,6 +7,17 @@
   let selfId = null;
   let selfScore = 0;
 
+  // Right-click overlay (leaderboard / legend / debug stats) and boost state.
+  let showOverlay = false;
+  let stats = { fps: 0, tickHz: 0, snapMs: 0, players: 0, humans: 0, bots: 0, food: 0,
+               selfScore: 0, selfGirth: 0, selfLength: 0, selfAlive: true, boosting: false,
+               leaderboard: [] };
+  let mouseBoost = false;
+  let keyBoost = false;
+  let fps = 0;
+  // Static legend: each bot strategy's color, plus a note that humans are random.
+  const legend = Object.entries(STRATEGY_COLORS).map(([name, color]) => ({ name, color }));
+
   let ws = null;
   const game = new Game();
   let raf = 0;
@@ -76,6 +87,68 @@
     const dy = -(my - headScreenY);
     game.selfTarget = { x: dx, y: dy };
     sendTarget(dx, dy);
+  }
+
+  function sendBoost(b) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'input', boost: b }));
+    }
+  }
+  function updateBoost() {
+    const b = mouseBoost || keyBoost;
+    game.selfBoosting = b;
+    sendBoost(b);
+  }
+  function toggleOverlay() {
+    showOverlay = !showOverlay;
+  }
+  function onMouseDown(e) {
+    if (e.button === 0) { mouseBoost = true; updateBoost(); }
+  }
+  function onMouseUp(e) {
+    if (e.button === 0) { mouseBoost = false; updateBoost(); }
+  }
+  function onContextMenu(e) {
+    e.preventDefault();
+    toggleOverlay();
+  }
+  // Keyboard sketch (full bindings later): Shift = boost, L = toggle overlay.
+  function onKeyDown(e) {
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { keyBoost = true; updateBoost(); }
+    else if (e.code === 'KeyL') { toggleOverlay(); }
+  }
+  function onKeyUp(e) {
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { keyBoost = false; updateBoost(); }
+  }
+  function updateStats() {
+    const players = Object.values(game.players).map((s) => s.server);
+    const bots = players.filter((p) => p.is_bot).length;
+    const self = game.players[game.selfId];
+    const board = players
+      .slice()
+      .sort((a, b) => b.score - a.score)
+      .map((p) => ({
+        name: p.username || (p.is_bot ? 'Bot' : '???'),
+        score: p.score,
+        color: p.is_bot && p.strategy && STRATEGY_COLORS[p.strategy]
+          ? STRATEGY_COLORS[p.strategy]
+          : colorFor(p.id),
+      }));
+    stats = {
+      fps: Math.round(fps),
+      tickHz: game.sim.tickHz,
+      snapMs: Math.round(game.snapInterval),
+      players: players.length,
+      humans: players.length - bots,
+      bots,
+      food: game.foods.length,
+      selfScore: self ? self.server.score : 0,
+      selfGirth: self ? self.server.girth : 0,
+      selfLength: self ? self.server.length : 0,
+      selfAlive: self ? self.server.alive : false,
+      boosting: game.selfBoosting,
+      leaderboard: board,
+    };
   }
 
   function draw() {
@@ -231,13 +304,17 @@
     let dt = (now - lastFrame) / 1000;
     lastFrame = now;
     if (dt > 0.1) dt = 0.1; // clamp after the tab was backgrounded
+    if (dt > 0) fps = fps * 0.9 + (1 / dt) * 0.1;
     game.step(dt);
     draw();
+    if (showOverlay) updateStats();
     raf = requestAnimationFrame(loop);
   }
 
   onMount(() => {
     game.onScore = (sc) => (selfScore = sc);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
     connect();
     lastFrame = performance.now();
     raf = requestAnimationFrame(loop);
@@ -245,19 +322,60 @@
 
   onDestroy(() => {
     cancelAnimationFrame(raf);
+    window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('keyup', onKeyUp);
     if (ws) ws.close();
   });
 </script>
 
-<div class="game">
-  <canvas bind:this={canvas} on:mousemove={onMouseMove}></canvas>
-  <div class="hud">
-    <span class="status {status}">{status}</span>
-    {#if selfId}
-      <span class="score">score {selfScore}</span>
+  <div class="game" role="application" on:mousedown={onMouseDown} on:mouseup={onMouseUp} on:contextmenu={onContextMenu}>
+    <canvas bind:this={canvas} on:mousemove={onMouseMove}></canvas>
+    <div class="hud">
+      <span class="status {status}">{status}</span>
+      {#if selfId}
+        <span class="score">score {selfScore}</span>
+      {/if}
+    </div>
+
+    {#if showOverlay}
+      <div class="overlay">
+        <div class="panel">
+          <h2>Debug / Leaderboard</h2>
+          <div class="cols">
+            <div class="col">
+              <h3>Stats</h3>
+              <ul>
+                <li>FPS: {stats.fps}</li>
+                <li>Tick rate: {stats.tickHz} Hz</li>
+                <li>Snapshot: {stats.snapMs} ms</li>
+                <li>Players: {stats.players} (humans {stats.humans}, bots {stats.bots})</li>
+                <li>Food: {stats.food}</li>
+                <li>You — score {stats.selfScore}, girth {stats.selfGirth}, length {stats.selfLength}, {stats.selfAlive ? 'alive' : 'dead'}{stats.boosting ? ', BOOSTING' : ''}</li>
+              </ul>
+            </div>
+            <div class="col">
+              <h3>Leaderboard</h3>
+              <ol>
+                {#each stats.leaderboard as p}
+                  <li><span class="swatch" style="background:{p.color}"></span>{p.name} — {p.score}</li>
+                {/each}
+              </ol>
+            </div>
+            <div class="col">
+              <h3>Legend</h3>
+              <ul>
+                {#each legend as s}
+                  <li><span class="swatch" style="background:{s.color}"></span>{s.name}</li>
+                {/each}
+                <li><span class="swatch" style="background:linear-gradient(90deg,#1f77b4,#ff7f0e)"></span>Humans (random)</li>
+              </ul>
+              <p class="hint">Left-click / Shift: boost · Right-click / L: toggle this</p>
+            </div>
+          </div>
+        </div>
+      </div>
     {/if}
   </div>
-</div>
 
 <style>
   .game {
@@ -291,4 +409,31 @@
   .status.connecting {
     color: #d29922;
   }
+  .overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(5, 8, 12, 0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .panel {
+    background: #0e141b;
+    border: 1px solid #2a3642;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    color: #c9d6e2;
+    font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    max-width: 92vw;
+  }
+  .panel h2 { margin: 0 0 0.5rem; font-size: 15px; color: #e6edf3; }
+  .panel h3 { margin: 0.5rem 0 0.25rem; font-size: 12px; color: #9fb0c0; text-transform: uppercase; letter-spacing: 0.04em; }
+  .cols { display: flex; gap: 2rem; flex-wrap: wrap; }
+  .col { min-width: 190px; }
+  .panel ul, .panel ol { margin: 0; padding-left: 1.1rem; }
+  .panel li { margin: 2px 0; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+  .hint { margin-top: 0.75rem; color: #6b7c8c; font-size: 11px; }
 </style>

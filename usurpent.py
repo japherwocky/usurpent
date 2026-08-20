@@ -153,6 +153,8 @@ class Player:
         # Bot flag and AI brain. Humans are not bots and have strategy=None.
         self.is_bot = False
         self.strategy = None
+        # Speed boost: set by the client's held boost control; applied in step.
+        self.boost = False
         # Food eaten across this whole session (all lives); persists across
         # respawns. Per-life score lives in self.score (reset on respawn).
         self.session_food = 0
@@ -168,6 +170,7 @@ class Player:
         self.target = (math.cos(self.heading), math.sin(self.heading))
         self.alive = True
         self.score = 0
+        self.boost = False
         # New life: not yet persisted. session_food is intentionally kept so
         # food from prior lives in this session still counts.
         self.life_persisted = False
@@ -200,8 +203,9 @@ class Player:
         max_step = self._turn_rate() * dt
         self.heading += max(-max_step, min(max_step, diff))
 
-        self.x += math.cos(self.heading) * config.HEAD_SPEED * dt
-        self.y += math.sin(self.heading) * config.HEAD_SPEED * dt
+        speed = config.HEAD_SPEED * (config.BOOST_MULTIPLIER if self.boost else 1.0)
+        self.x += math.cos(self.heading) * speed * dt
+        self.y += math.sin(self.heading) * speed * dt
         self.x = max(0.0, min(config.MAP_WIDTH, self.x))
         self.y = max(0.0, min(config.MAP_HEIGHT, self.y))
 
@@ -242,6 +246,7 @@ class Player:
             protocol.FIELD_USERNAME: self.username,
             protocol.FIELD_IS_BOT: self.is_bot,
             protocol.FIELD_STRATEGY: self.strategy.name if self.strategy else None,
+            protocol.FIELD_BOOST: self.boost,
         }
 
 
@@ -486,6 +491,7 @@ class World:
             protocol.FIELD_MAP_HEIGHT: config.MAP_HEIGHT,
             protocol.FIELD_HEAD_SPEED: config.HEAD_SPEED,
             protocol.FIELD_MAX_TURN_RATE: config.MAX_TURN_RATE,
+            protocol.FIELD_BOOST_MULTIPLIER: config.BOOST_MULTIPLIER,
             protocol.FIELD_SEGMENT_SPACING_FACTOR: config.SEGMENT_SPACING_FACTOR,
             protocol.FIELD_MIN_SEGMENT_SPACING: config.MIN_SEGMENT_SPACING,
             protocol.FIELD_TICK_HZ: config.TICK_HZ,
@@ -532,11 +538,14 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
             return
         if data.get(protocol.FIELD_TYPE) != protocol.TYPE_INPUT:
             return
-        target = data.get(protocol.FIELD_TARGET)
-        if not isinstance(target, dict):
-            return
         player = self.application.world.players.get(self.player_id)
-        if player is not None and player.alive:
+        if player is None:
+            return
+        # Boost is an independent flag; it may arrive without a target.
+        if protocol.FIELD_BOOST in data:
+            player.boost = bool(data[protocol.FIELD_BOOST])
+        target = data.get(protocol.FIELD_TARGET)
+        if isinstance(target, dict) and player.alive:
             player.set_target(float(target[protocol.FIELD_X]),
                               float(target[protocol.FIELD_Y]))
 

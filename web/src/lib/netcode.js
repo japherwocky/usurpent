@@ -11,7 +11,7 @@
 
 const SIM = { headSpeed: 120, maxTurnRate: 8.4, tickHz: 20,
   baseGirth: 6, maxGirth: 24, turnGirthFalloff: 0.4,
-  segmentSpacingFactor: 0.333, minSegmentSpacing: 1.0 };
+  segmentSpacingFactor: 0.333, minSegmentSpacing: 1.0, boostMultiplier: 1.8 };
 
 export const PALETTE = [
   '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
@@ -82,7 +82,7 @@ function reconcileLocal(st) {
   st.local.girth = st.server.girth;
 }
 
-function stepLocal(local, dt, target, mapW, mapH, sim) {
+function stepLocal(local, dt, target, mapW, mapH, sim, boost) {
   // target is a direction vector (dx, dy), not a world point: steer toward
   // that absolute heading so holding a direction yields a straight path.
   let desired;
@@ -101,8 +101,10 @@ function stepLocal(local, dt, target, mapW, mapH, sim) {
   const maxStep = effTurn * dt;
   local.heading += Math.max(-maxStep, Math.min(maxStep, diff));
 
-  local.x += Math.cos(local.heading) * sim.headSpeed * dt;
-  local.y += Math.sin(local.heading) * sim.headSpeed * dt;
+  // Match the server: boosting multiplies head speed while the control is held.
+  const speed = sim.headSpeed * (boost ? sim.boostMultiplier : 1);
+  local.x += Math.cos(local.heading) * speed * dt;
+  local.y += Math.sin(local.heading) * speed * dt;
   local.x = Math.max(0, Math.min(mapW, local.x));
   local.y = Math.max(0, Math.min(mapH, local.y));
 
@@ -160,6 +162,7 @@ export class Game {
     this.lastSnapTime = 0;
     this.snapInterval = 50;
     this.selfTarget = { x: 0, y: 0 };
+    this.selfBoosting = false; // mirror of the held boost control, for prediction
     this.foodSpawnRadius = 0; // radius of the central food-spawn circle
     this.onScore = null; // (score:number) => void, called when self score changes
   }
@@ -178,6 +181,7 @@ export class Game {
     if (msg.base_girth) this.sim.baseGirth = msg.base_girth;
     if (msg.max_girth) this.sim.maxGirth = msg.max_girth;
     if (msg.turn_girth_falloff !== undefined) this.sim.turnGirthFalloff = msg.turn_girth_falloff;
+    if (msg.boost_multiplier !== undefined) this.sim.boostMultiplier = msg.boost_multiplier;
     if (msg.segment_spacing_factor !== undefined) this.sim.segmentSpacingFactor = msg.segment_spacing_factor;
     if (msg.min_segment_spacing !== undefined) this.sim.minSegmentSpacing = msg.min_segment_spacing;
     this.players = {};
@@ -213,7 +217,7 @@ export class Game {
   step(dt) {
     const st = this.players[this.selfId];
     if (st && st.local && st.server && st.server.alive) {
-      stepLocal(st.local, dt, this.selfTarget, this.mapW, this.mapH, this.sim);
+      stepLocal(st.local, dt, this.selfTarget, this.mapW, this.mapH, this.sim, this.selfBoosting);
     }
   }
 
