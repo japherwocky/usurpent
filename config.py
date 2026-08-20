@@ -40,9 +40,13 @@ HEAD_SPEED = _env_float("USURPENT_HEAD_SPEED", 80.0)           # units / second
 MAX_TURN_RATE = _env_float("USURPENT_MAX_TURN_RATE", 8.4)      # radians / second (base)
 TURN_GIRTH_FALLOFF = _env_float("USURPENT_TURN_GIRTH_FALLOFF", 0.4)  # max turn-rate loss at MAX_GIRTH
 
-# Tail shape.
-TAIL_SEGMENT_SPACING = _env_float("USURPENT_TAIL_SEGMENT_SPACING", 8.0)
-INITIAL_TAIL_LENGTH = _env_int("USURPENT_INITIAL_TAIL_LENGTH", 20)
+# Tail shape. `length` is a world-length target; the spacing between rendered
+# segments scales with girth so circles overlap into a connected tube at every
+# size (thin snakes get closer-spaced segments). spacing =
+# max(MIN_SEGMENT_SPACING, girth * SEGMENT_SPACING_FACTOR).
+SEGMENT_SPACING_FACTOR = _env_float("USURPENT_SEGMENT_SPACING_FACTOR", 0.333)
+MIN_SEGMENT_SPACING = _env_float("USURPENT_MIN_SEGMENT_SPACING", 1.0)
+INITIAL_BODY_LENGTH = _env_int("USURPENT_INITIAL_BODY_LENGTH", 160)  # world units
 
 # Body girth: the snake's thickness in world units. It grows as the snake eats
 # and caps at MAX_GIRTH. Girth drives both the rendered body size and the
@@ -55,7 +59,7 @@ MAX_GIRTH = _env_float("USURPENT_MAX_GIRTH", 24.0)
 # Each pellet carries a radius and a value; bigger pellets are worth more
 # (value = round(radius / FOOD_RADIUS_PER_VALUE), minimum 1). Eating a pellet
 # adds `value` to score and `value * FOOD_GROWTH` to tail length.
-FOOD_GROWTH = _env_int("USURPENT_FOOD_GROWTH", 2)              # tail length per value point
+BODY_GROWTH = _env_int("USURPENT_BODY_GROWTH", 16)            # world-length units per pellet value
 FOOD_COUNT = _env_int("USURPENT_FOOD_COUNT", 30)               # initial seed at start
 FOOD_BASE_RADIUS = _env_float("USURPENT_FOOD_BASE_RADIUS", 5.0)
 FOOD_RADIUS_PER_VALUE = _env_float("USURPENT_FOOD_RADIUS_PER_VALUE", 10.0)

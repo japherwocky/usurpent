@@ -9,8 +9,9 @@
 // This module is framework-agnostic; the Svelte component drives it: it feeds
 // welcome/snapshot messages in and reads renderList()/alpha() out each frame.
 
-const SIM = { headSpeed: 120, maxTurnRate: 8.4, tailSpacing: 8, tickHz: 20,
-  baseGirth: 6, maxGirth: 24, turnGirthFalloff: 0.4 };
+const SIM = { headSpeed: 120, maxTurnRate: 8.4, tickHz: 20,
+  baseGirth: 6, maxGirth: 24, turnGirthFalloff: 0.4,
+  segmentSpacingFactor: 0.333, minSegmentSpacing: 1.0 };
 
 export const PALETTE = [
   '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
@@ -48,7 +49,7 @@ function cloneLocal(p) {
     y: p.y,
     heading: p.heading,
     points: p.points.map((pt) => [pt[0], pt[1]]),
-    cap: p.points.length,
+    length: p.length,
     girth: p.girth,
   };
 }
@@ -69,7 +70,7 @@ function reconcileLocal(st) {
   st.local.y = st.server.y;
   st.local.heading = st.server.heading;
   st.local.points = st.server.points.map((pt) => [pt[0], pt[1]]);
-  st.local.cap = st.server.points.length;
+  st.local.length = st.server.length;
   st.local.girth = st.server.girth;
 }
 
@@ -97,10 +98,14 @@ function stepLocal(local, dt, target, mapW, mapH, sim) {
   local.x = Math.max(0, Math.min(mapW, local.x));
   local.y = Math.max(0, Math.min(mapH, local.y));
 
+  // Segment spacing scales with girth (matches the server) so the predicted
+  // trail density lines up with what the server renders.
+  const spacing = Math.max(sim.minSegmentSpacing, g * sim.segmentSpacingFactor);
   const last = local.points[local.points.length - 1];
-  if (Math.hypot(local.x - last[0], local.y - last[1]) >= sim.tailSpacing) {
+  if (Math.hypot(local.x - last[0], local.y - last[1]) >= spacing) {
     local.points.push([local.x, local.y]);
-    while (local.points.length > local.cap) local.points.shift();
+    const maxPoints = Math.max(1, Math.round((local.length || 0) / spacing) + 1);
+    while (local.points.length > maxPoints) local.points.shift();
   }
 }
 
@@ -161,6 +166,8 @@ export class Game {
     if (msg.base_girth) this.sim.baseGirth = msg.base_girth;
     if (msg.max_girth) this.sim.maxGirth = msg.max_girth;
     if (msg.turn_girth_falloff !== undefined) this.sim.turnGirthFalloff = msg.turn_girth_falloff;
+    if (msg.segment_spacing_factor !== undefined) this.sim.segmentSpacingFactor = msg.segment_spacing_factor;
+    if (msg.min_segment_spacing !== undefined) this.sim.minSegmentSpacing = msg.min_segment_spacing;
     this.players = {};
     msg.players.forEach((p) => (this.players[p.id] = makeState(p, this.selfId)));
     this.foods = msg.food || [];

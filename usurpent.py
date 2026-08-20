@@ -167,15 +167,17 @@ class Player:
         # New life: not yet persisted. session_food is intentionally kept so
         # food from prior lives in this session still counts.
         self.life_persisted = False
-        self.length = config.INITIAL_TAIL_LENGTH
+        self.length = config.INITIAL_BODY_LENGTH
         self.girth = _girth_for_score(0)
         # Seed the trail as a line behind the head so it renders as a snake.
+        # Spacing scales with girth so segments overlap into a connected tube.
+        spacing = self._segment_spacing()
+        n = max(1, round(self.length / spacing) + 1)
         back_x = -math.cos(self.heading)
         back_y = -math.sin(self.heading)
         self.points = [
-            (x + back_x * i * config.TAIL_SEGMENT_SPACING,
-             y + back_y * i * config.TAIL_SEGMENT_SPACING)
-            for i in range(self.length)
+            (x + back_x * i * spacing, y + back_y * i * spacing)
+            for i in range(n)
         ]
 
     def set_target(self, x, y):
@@ -199,10 +201,12 @@ class Player:
         self.x = max(0.0, min(config.MAP_WIDTH, self.x))
         self.y = max(0.0, min(config.MAP_HEIGHT, self.y))
 
-        last_x, last_y = self.points[-1]
-        if math.hypot(self.x - last_x, self.y - last_y) >= config.TAIL_SEGMENT_SPACING:
+        spacing = self._segment_spacing()
+        last = self.points[-1]
+        if math.hypot(self.x - last[0], self.y - last[1]) >= spacing:
             self.points.append((self.x, self.y))
-            while len(self.points) > self.length:
+            max_points = max(1, round(self.length / spacing) + 1)
+            while len(self.points) > max_points:
                 self.points.pop(0)
 
     def _turn_rate(self):
@@ -215,6 +219,11 @@ class Player:
             rate *= 1.0 - config.TURN_GIRTH_FALLOFF * frac
         return max(0.1, rate)
 
+    def _segment_spacing(self):
+        """Distance between rendered body segments. Scales with girth so the
+        circles overlap into a connected tube at every size."""
+        return max(config.MIN_SEGMENT_SPACING, self.girth * config.SEGMENT_SPACING_FACTOR)
+
     def to_dict(self):
         return {
             protocol.FIELD_ID: self.id,
@@ -225,6 +234,7 @@ class Player:
             protocol.FIELD_ALIVE: self.alive,
             protocol.FIELD_SCORE: self.score,
             protocol.FIELD_GIRTH: round(self.girth, 2),
+            protocol.FIELD_LENGTH: round(self.length, 1),
             protocol.FIELD_USERNAME: self.username,
         }
 
@@ -319,7 +329,7 @@ class World:
                 self._spawn_food()
 
     def _free_spot(self):
-        margin = config.INITIAL_TAIL_LENGTH * config.TAIL_SEGMENT_SPACING
+        margin = config.INITIAL_BODY_LENGTH
         return (
             random.uniform(margin, config.MAP_WIDTH - margin),
             random.uniform(margin, config.MAP_HEIGHT - margin),
@@ -334,7 +344,7 @@ class World:
                 if math.hypot(player.x - fx, player.y - fy) < (food["r"] + config.FOOD_PICKUP_PAD):
                     del self.foods[fid]
                     player.score += food["value"]
-                    player.length += food["value"] * config.FOOD_GROWTH
+                    player.length += food["value"] * config.BODY_GROWTH
                     player.session_food += 1
                     player.girth = _girth_for_score(player.score)
 
@@ -445,7 +455,8 @@ class World:
             protocol.FIELD_MAP_HEIGHT: config.MAP_HEIGHT,
             protocol.FIELD_HEAD_SPEED: config.HEAD_SPEED,
             protocol.FIELD_MAX_TURN_RATE: config.MAX_TURN_RATE,
-            protocol.FIELD_TAIL_SPACING: config.TAIL_SEGMENT_SPACING,
+            protocol.FIELD_SEGMENT_SPACING_FACTOR: config.SEGMENT_SPACING_FACTOR,
+            protocol.FIELD_MIN_SEGMENT_SPACING: config.MIN_SEGMENT_SPACING,
             protocol.FIELD_TICK_HZ: config.TICK_HZ,
             protocol.FIELD_FOOD_SPAWN_RADIUS: config.FOOD_SPAWN_RADIUS,
             protocol.FIELD_BASE_GIRTH: config.BASE_GIRTH,
