@@ -139,6 +139,9 @@ class Player:
         # stats back to the Account row on death/disconnect.
         self.account_id = getattr(handler, "account_id", None)
         self.username = getattr(handler, "username", None)
+        # Food eaten across this whole session (all lives); persists across
+        # respawns. Per-life score lives in self.score (reset on respawn).
+        self.session_food = 0
         self.respawn(x, y)
 
     def respawn(self, x, y):
@@ -149,6 +152,9 @@ class Player:
         self.target = (x, y)
         self.alive = True
         self.score = 0
+        # New life: not yet persisted. session_food is intentionally kept so
+        # food from prior lives in this session still counts.
+        self.life_persisted = False
         self.length = config.INITIAL_TAIL_LENGTH
         # Seed the trail as a line behind the head so it renders as a snake.
         back_x = -math.cos(self.heading)
@@ -239,6 +245,11 @@ class World:
         return player_id
 
     def remove_player(self, player_id):
+        player = self.players.get(player_id)
+        if player is not None:
+            # Persist the current life if it had not already been recorded
+            # at death (i.e. the player disconnected while still alive).
+            self._persist_life(player)
         self.players.pop(player_id, None)
         logging.info(f"Player {player_id} removed (total: {len(self.players)})")
         self._broadcast_snapshot()
@@ -268,6 +279,7 @@ class World:
                     del self.foods[fid]
                     player.length += config.FOOD_GROWTH
                     player.score += 1
+                    player.session_food += 1
         while len(self.foods) < config.FOOD_COUNT:
             self._spawn_food()
 
@@ -288,10 +300,30 @@ class World:
 
     def _kill_player(self, player):
         player.alive = False
-        logging.info(f"Player {player.id} died (score {player.score})")
+        logging.info(f"Player died (score {player.score})")
+        # Record this life's stats now; the respawn that follows starts fresh.
+        self._persist_life(player)
         tornado.ioloop.IOLoop.current().call_later(
             config.RESPAWN_DELAY, self._respawn_player, player.id
         )
+
+    def _persist_life(self, player):
+        """Write one life's stats to the linked Account (no-op for guests).
+
+        Guarded by `life_persisted` so a death-then-disconnect (or repeated
+        calls) only records the life once.
+        """
+        if player.account_id is None or player.life_persisted:
+            return
+        account = Account.get_or_none(Account.id == player.account_id)
+        if account is None:
+            player.life_persisted = True
+            return
+        account.games_played += 1
+        account.high_score = max(account.high_score, player.score)
+        account.total_food += player.score
+        account.save()
+        player.life_persisted = True
 
     def _respawn_player(self, player_id):
         player = self.players.get(player_id)
