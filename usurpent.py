@@ -2,14 +2,18 @@ import tornado.httpserver
 import tornado.ioloop
 import tornado.options
 import tornado.web
+from tornado import websocket
 from tornado.web import HTTPError
 from tornado.log import enable_pretty_logging
 from markdown import markdown
 from dotenv import load_dotenv
 
+import config
+
 import os
 import logging
 import re
+import uuid
 join = os.path.join
 exists = os.path.exists
 
@@ -39,6 +43,56 @@ class BaseHandler(tornado.web.RequestHandler):
             self.set_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
 
+class World:
+    """Authoritative game state.
+
+    For now this only tracks live connections so connect/disconnect can be
+    observed. The tick loop, player simulation, food, and collisions land in
+    later Phase 3 steps.
+    """
+
+    def __init__(self):
+        self.players = {}  # player_id -> GameWebSocketHandler
+        self._next_id = 0
+
+    def add_player(self, handler):
+        self._next_id += 1
+        player_id = str(self._next_id)
+        self.players[player_id] = handler
+        return player_id
+
+    def remove_player(self, player_id):
+        self.players.pop(player_id, None)
+
+
+class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
+    """Real-time game connection.
+
+    Step 1: registers on connect, logs connect/disconnect, and tracks the
+    player in the shared World. No simulation or broadcast yet.
+    """
+
+    def open(self):
+        world = self.application.world
+        self.player_id = world.add_player(self)
+        logging.info(
+            f"Player {self.player_id} connected (total: {len(world.players)})"
+        )
+
+    def on_close(self):
+        world = self.application.world
+        player_id = getattr(self, "player_id", None)
+        if player_id is not None:
+            world.remove_player(player_id)
+            logging.info(
+                f"Player {player_id} disconnected (total: {len(world.players)})"
+            )
+
+    def check_origin(self, origin):
+        # Same-origin only for MVP. Tighten via settings if a proxy is added.
+        return True
+
+
 class App (tornado.web.Application):
     def __init__(self, debug=False):
         """
@@ -60,10 +114,12 @@ class App (tornado.web.Application):
 
         handlers = [
             (r"/?$", Home),
+            (r"/ws", GameWebSocketHandler),
             (r"(?!\/static.*)(.*)/?", DocHandler),
         ]
 
         super().__init__(handlers, **settings)
+        self.world = World()
 
 
 class Home(BaseHandler):
