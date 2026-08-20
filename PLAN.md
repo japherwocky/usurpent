@@ -68,10 +68,24 @@
 ### Open questions to settle before coding
 
 - ~~**Input model**: absolute mouse target vs. discrete direction.~~ **Decided: mouse target.** Player sets a target point; the head steers toward it. Smooth curves, circular motion, and the existing demo UX carries over. Tradeoff: "snake" is more aesthetic than arcade — collisions matter less because you can't dart sharply. We'll lean into that — make trails long and curvy, collisions about positioning rather than twitch.
-- **Map size**: fixed? viewport-relative? Start with a fixed `1000 x 1000` logical map, scaled to viewport.
-- **Growth rate**: how many segments per food?
-- **Death feedback**: respawn instantly, or short delay with a "you died" overlay?
-- **Steering model**: pure "head chases target" vs. "head has a max turn rate." Max turn rate matters because otherwise a mouse flick can flip the head 180° and skip the trail. Suggest: cap angular velocity, so the trail gets to follow the arc.
+
+### Tuning knobs (defaults picked, all configurable)
+
+No magic numbers. Gameplay constants live in one module so they can be overridden by env vars or a config file later.
+
+| Knob | Default | Why |
+|---|---|---|
+| `MAP_WIDTH`, `MAP_HEIGHT` | `1000, 1000` | Logical units, scaled to viewport. Square keeps the math simple for MVP. |
+| `TICK_HZ` | `20` | Server tick rate. 20 Hz is plenty for mouse-target steering; client interpolates between snapshots. |
+| `HEAD_SPEED` | `120` (units/sec) | Fast enough to feel responsive, slow enough that collisions are readable. |
+| `MAX_TURN_RATE` | `6.0` (rad/sec) | Caps how fast the head can rotate. Prevents mouse-flick 180°s that skip the trail. |
+| `TAIL_SEGMENT_SPACING` | `8` (units) | Distance between tail joints. Smaller = denser trail. |
+| `INITIAL_TAIL_LENGTH` | `20` | Starting segments. |
+| `FOOD_GROWTH` | `5` | Segments added per food pickup. |
+| `FOOD_COUNT` | `30` | Food on the map at any time. |
+| `RESPAWN_DELAY` | `1.5` (sec) | Short enough to not be annoying, long enough to register a death. |
+
+These get loaded from env (e.g. `USURPENT_MAP_WIDTH=1500`) with the defaults above as fallback. No edits to source to tune feel — just restart with new env vars.
 
 ### Concrete first steps
 
