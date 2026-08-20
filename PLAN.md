@@ -100,8 +100,9 @@ These get loaded from env (e.g. `USURPENT_MAP_WIDTH=1500`) with the defaults abo
 
 ### Deferred from the original client plan
 
-- **Client-side prediction for self** and **true interpolation for others**: the client currently renders server snapshots directly, gliding between them with 50 ms D3 transitions. Good enough at 20 Hz; add prediction/reconciliation if motion feels laggy.
-- **`world` field in welcome**: welcome carries `players` + `food` directly (no nested `world` wrapper). Minor wire-format difference from the early sketch.
+- ✅ **Client-side prediction for self**: the client now predicts its own snake each animation frame using the same steering model as the server (constants shared in the welcome message), and reconciles to the authoritative snapshot on arrival. Removes input latency on your own snake.
+- ✅ **Interpolation for others**: other players are rendered by lerping between the last two snapshots by elapsed time, so they glide at 20 Hz instead of jumping.
+- **`world` field in welcome**: welcome carries `players` + `food` directly (no nested `world` wrapper). Minor wire-format difference from the early sketch; harmless.
 
 ## Risks
 

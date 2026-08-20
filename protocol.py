@@ -21,6 +21,10 @@ FIELD_Y = "y"
 FIELD_MAP_WIDTH = "map_width"
 FIELD_MAP_HEIGHT = "map_height"
 FIELD_FOOD = "food"
+FIELD_HEAD_SPEED = "head_speed"
+FIELD_MAX_TURN_RATE = "max_turn_rate"
+FIELD_TAIL_SPACING = "tail_spacing"
+FIELD_TICK_HZ = "tick_hz"
 
 # Per-player fields inside a snapshot's player list.
 FIELD_ID = "id"

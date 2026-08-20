@@ -244,6 +244,10 @@ class World:
             protocol.FIELD_SELF_ID: self_id,
             protocol.FIELD_MAP_WIDTH: config.MAP_WIDTH,
             protocol.FIELD_MAP_HEIGHT: config.MAP_HEIGHT,
+            protocol.FIELD_HEAD_SPEED: config.HEAD_SPEED,
+            protocol.FIELD_MAX_TURN_RATE: config.MAX_TURN_RATE,
+            protocol.FIELD_TAIL_SPACING: config.TAIL_SEGMENT_SPACING,
+            protocol.FIELD_TICK_HZ: config.TICK_HZ,
             protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
             protocol.FIELD_FOOD: self._food_list(),
         }
