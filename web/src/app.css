@@ -7,6 +7,15 @@
   box-sizing: border-box;
 }
 
+/* Form controls don't inherit font-family from :root (the UA stylesheet
+   sets its own), so force them to use the project font. */
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
 html,
 body,
 #app {
