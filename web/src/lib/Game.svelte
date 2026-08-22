@@ -291,7 +291,7 @@
       if (pl.username) {
         ctx.globalAlpha = pl.alive ? 0.9 : 0.4;
         ctx.fillStyle = '#e6edf3';
-        ctx.font = '11px sans-serif';
+        ctx.font = '11px "Silkscreen", sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(pl.username, hx, hy - girthPx - 4);
       }
@@ -313,6 +313,11 @@
 
   onMount(() => {
     game.onScore = (sc) => (selfScore = sc);
+    // Preload the pixel font so canvas labels don't flash a fallback.
+    if (document.fonts && document.fonts.load) {
+      document.fonts.load('11px "Silkscreen"');
+      document.fonts.load('700 11px "Silkscreen"');
+    }
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     connect();

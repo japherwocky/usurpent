@@ -104,7 +104,7 @@
       {#if error}<p class="error">{error}</p>{/if}
 
       <button type="submit" disabled={busy || !username || !password}>
-        {busy ? '…' : mode === 'register' ? 'Register' : 'Log in'}
+        {busy ? '…' : mode === 'register' ? 'Register' : 'login'}
       </button>
 
       <p class="toggle">

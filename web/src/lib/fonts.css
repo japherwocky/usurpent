@@ -1,0 +1,17 @@
+/* Silkscreen — a pixel/bitmap screen font by Jason Kottke.
+   SIL Open Font License; see OFL.txt shipped alongside these files. */
+@font-face {
+  font-family: 'Silkscreen';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/Silkscreen-Regular.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Silkscreen';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/Silkscreen-Bold.ttf') format('truetype');
+}
