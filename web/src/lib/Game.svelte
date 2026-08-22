@@ -2,6 +2,9 @@
   import { onMount, onDestroy } from 'svelte';
   import { Game, colorFor, PALETTE, STRATEGY_COLORS } from './netcode.js';
 
+  // Display name chosen in the lobby; sent to the server on connect.
+  export let name = '';
+
   let canvas;
   let status = 'connecting';
   let selfId = null;
@@ -53,7 +56,8 @@
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/ws`);
+    const q = name ? `?name=${encodeURIComponent(name)}` : '';
+    ws = new WebSocket(`${proto}://${location.host}/ws${q}`);
     ws.onopen = () => (status = 'open');
     ws.onclose = () => (status = 'closed');
     ws.onmessage = (ev) => {

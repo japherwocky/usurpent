@@ -1,15 +1,22 @@
 <script>
-  import Auth from './lib/Auth.svelte';
+  import Lobby from './lib/Lobby.svelte';
   import Game from './lib/Game.svelte';
+
+  let screen = 'lobby';
+  let playerName = '';
+
+  function handlePlay(event) {
+    playerName = event.detail.name;
+    screen = 'game';
+  }
 </script>
 
 <main>
-  <header>
-    <h1>USURPENT</h1>
-    <Auth />
-  </header>
-
-  <Game />
+  {#if screen === 'lobby'}
+    <Lobby on:play={handlePlay} />
+  {:else}
+    <Game name={playerName} />
+  {/if}
 </main>
 
 <style>
@@ -18,18 +25,5 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
-  }
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 1rem 1.5rem;
-    border-bottom: 1px solid #2a323c;
-  }
-  h1 {
-    letter-spacing: 0.3em;
-    font-weight: 700;
-    margin: 0;
-    font-size: 1.4rem;
   }
 </style>

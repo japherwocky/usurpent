@@ -36,6 +36,27 @@ def _valid_username(username):
     return isinstance(username, str) and bool(_USERNAME_RE.match(username))
 
 
+# Pools for server-assigned guest names (combined into e.g. "SlyMamba").
+_GUEST_ADJECTIVES = [
+    "Quick", "Lazy", "Sly", "Bold", "Calm", "Wild", "Iron", "Crimson",
+    "Shadow", "Neon", "Ancient", "Hungry", "Silent", "Feral", "Cosmic",
+]
+_GUEST_ANIMALS = [
+    "Viper", "Cobra", "Adder", "Mamba", "Python", "Serpent", "Wyrm",
+    "Eel", "Naga", "Boa", "Rattler", "Krait", "Asp", "Hydra",
+]
+
+
+def _assign_guest_name(players=()):
+    """Pick a fun, valid, best-effort-unique guest name."""
+    taken = {getattr(p, "username", None) for p in players}
+    for _ in range(12):
+        name = random.choice(_GUEST_ADJECTIVES) + random.choice(_GUEST_ANIMALS)
+        if _valid_username(name) and name not in taken:
+            return name
+    return f"Guest{random.randint(1000, 9999)}"
+
+
 def _valid_password(password):
     return isinstance(password, str) and len(password) >= 8
 
@@ -527,7 +548,16 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
         # is signed, so we trust it directly rather than re-authenticating.
         account = self.current_account
         self.account_id = account.id if account is not None else None
-        self.username = account.username if account is not None else None
+        # Every player needs a display name. Prefer a client-supplied name
+        # (from the ?name= WS query arg), fall back to the account username,
+        # then to a server-assigned guest name.
+        raw_name = (self.get_query_argument("name", default="") or "").strip()
+        if _valid_username(raw_name):
+            self.username = raw_name
+        elif account is not None:
+            self.username = account.username
+        else:
+            self.username = _assign_guest_name(self.application.world.players.values())
         self.application.world.spawn_player(self)
 
     def on_message(self, message):

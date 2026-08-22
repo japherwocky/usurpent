@@ -1,5 +1,8 @@
 <script>
+  import { createEventDispatcher } from 'svelte';
   import { apiGet, apiPost } from './api.js';
+
+  const dispatch = createEventDispatcher();
 
   // 'login' or 'register'
   let mode = 'login';
@@ -17,6 +20,7 @@
     } catch (e) {
       session = { guest: true };
     }
+    dispatch('session', session);
   }
 
   async function submit() {
