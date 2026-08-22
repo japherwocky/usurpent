@@ -38,8 +38,7 @@ usurpent/
 ├── requirements.txt     # Python dependencies
 ├── Makefile            # Build and development commands
 ├── static/
-│   ├── game.js         # Frontend game logic (WS client, prediction, rendering)
-│   └── netcodedemo.html # Network demo implementation
+│   └── game.js         # Frontend game logic (WS client, prediction, rendering)
 ├── templates/
 │   └── index.html      # Main game interface
 └── README.md           # This file
