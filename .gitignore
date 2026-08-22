@@ -10,6 +10,9 @@ env/
 node_modules
 web/dist
 
+# vite temp copy of the config it compiles on startup
+vite.config.js.timestamp-*.mjs
+
 # default dev datastore
 data.db
 *.db
