@@ -24,13 +24,17 @@ direction (mouse offset from screen center), not a world target.
 - `db.py` — Peewee `SqliteDatabase` + `init_db()` (creates tables; called from
   `App.__init__`).
 - `models.py` — `Account` model (registered players) with bcrypt password helpers.
+- `bots.py` — AI snake strategies. Each is a class with `think(world, bot)`;
+  add one to `REGISTRY` and the world spawns it round-robin.
+- `carcass.py` — Scatter patterns for a dead snake's pellets. Each is a
+  `scatter(points, spread) -> [(x, y), ...]` function; add one to `REGISTRY`
+  and deaths start picking it at random.
 - `web/` — Vite + Svelte frontend. Source in `web/src`, built to `web/dist`
   (gitignored). Tornado serves `web/dist` in production; Vite serves it and
   proxies `/ws` to the backend in development.
 - `templates/` + `static/game.js` — Retired vanilla D3 client and entry page.
   The renderer was ported to Svelte in #182; these remain only as historical
   reference and are no longer served.
-- `static/netcodedemo.html` — Standalone netcode teaching demo.
 - `pyrightconfig.json` — Points pyright at the venv (`venvPath`/`venv`). Do not
   set `pythonPath` there; it is not a valid pyright setting.
 - `requirements.txt` — Runtime deps only.
@@ -95,6 +99,28 @@ control the visible order when sequence matters (e.g. scaffold-before-feature).
 Workflow: keep cards moving Backlog → To Do → In Progress → Done as you work.
 When you start a card, move it to In Progress; when the code is committed, move
 it to Done.
+
+## Food and pellet gravity
+
+Food is the dominant term in snapshot size, so the food list is kept small by
+design. Three invariants hold it together — breaking any one of them brings
+back the unbounded-growth bug that made the game feel laggy:
+
+- **`FOOD_MAX` is global.** Anything that creates pellets goes through
+  `World._make_room()` first. It evicts oldest-first and only evicts `dropped`
+  crumbs, so spawned pellets (which mark the spawn circle) survive.
+- **Merging conserves value exactly.** `_merge_food()` sums `value` and grows
+  the radius by area, `sqrt(r1^2 + r2^2)`, capped at `FOOD_MERGE_MAX_RADIUS`.
+  A blob is worth exactly what its crumbs were worth, so the score economy is
+  unaffected by how much has clumped. A merged pellet stays `dropped` if
+  either half was, so merging cannot launder crumbs past the cap.
+- **Both gravity passes are sharded** by `FOOD_GRAVITY_SHARDS`: a pellet is
+  processed once every N ticks, keyed on its id. Drift steps are scaled by N,
+  so sharding changes cost and not speed. This also flattens the cost spike
+  when a big carcass lands wanting to fuse all at once.
+
+Measure before tuning — `World.tick()` runs well under 1 ms typically, and the
+whole tick budget is 50 ms at `TICK_HZ=20`.
 
 ## Conventions
 

@@ -79,6 +79,40 @@ FOOD_MAX = _env_int("USURPENT_FOOD_MAX", 1000)                         # cap to 
 # segment, sized from its girth. Dropped pellets render at lower opacity.
 DROP_RADIUS_FACTOR = _env_float("USURPENT_DROP_RADIUS_FACTOR", 0.4)    # carcass radius = girth * this
 CARCASS_MAX_PELLETS = _env_int("USURPENT_CARCASS_MAX_PELLETS", 400)    # sample if longer
+# Pellets are thrown clear of the spine in one of the shapes in carcass.py,
+# picked at random per death. Spread scales with girth, so a big serpent
+# leaves a correspondingly big mess.
+CARCASS_SPREAD_FACTOR = _env_float("USURPENT_CARCASS_SPREAD_FACTOR", 3.8)
+
+# Pellet gravity: loose pellets drift toward nearby pellets and merge on
+# contact, so a scattered carcass slowly gathers itself into a few fat blobs
+# instead of littering the map. This is a gameplay hook (big blobs are worth
+# hunting, and a fresh kill is a feast that clumps up while you race for it)
+# and it is what keeps the food list small on its own -- FOOD_MAX is only the
+# backstop. Merging conserves value exactly: a blob is worth what its crumbs
+# were worth, so the score economy is unchanged.
+FOOD_ATTRACT_RADIUS = _env_float("USURPENT_FOOD_ATTRACT_RADIUS", 140.0)  # pull range
+# Drift speed for a value-1 crumb, in world units/sec. HEAD_SPEED is 80, so
+# this is deliberately a slow crawl -- you should be able to watch a carcass
+# gather, and always outrun it.
+FOOD_ATTRACT_SPEED = _env_float("USURPENT_FOOD_ATTRACT_SPEED", 7.0)
+# Both gravity passes work on a rota rather than the whole field every tick:
+# each tick only the shard whose pellet id matches gets its neighbourhood
+# scanned. Ids are handed out in sequence, so a carcass spreads itself evenly
+# across the rota. Drift steps are scaled by the shard count, so this buys
+# cost and not slowness (use FOOD_ATTRACT_SPEED for slowness). It also flattens
+# the cost spike when a big carcass lands and a thousand crumbs want to fuse
+# on the same tick.
+FOOD_GRAVITY_SHARDS = _env_int("USURPENT_FOOD_GRAVITY_SHARDS", 8)
+FOOD_MERGE_MAX_RADIUS = _env_float("USURPENT_FOOD_MERGE_MAX_RADIUS", 34.0)  # blobs stop growing here
+# How deeply two pellets must overlap before they fuse, as a fraction of
+# (r1 + r2). At 1.0 they merge the instant their circles graze -- which means
+# a fresh carcass, whose crumbs are dropped closer together than their own
+# diameter, collapses on the very first tick and the drift never shows. Lower
+# values make pellets travel visibly toward each other before fusing. At 0.25
+# a fresh carcass lands as a lootable field of crumbs that visibly crawls
+# together over the next ten seconds or so.
+FOOD_MERGE_OVERLAP = _env_float("USURPENT_FOOD_MERGE_OVERLAP", 0.25)
 
 # Bots: server-side AI snakes that play alongside humans. Each bot runs a
 # "strategy" (see bots.py) so different AIs can compete. BOT_COUNT is the

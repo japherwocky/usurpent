@@ -7,6 +7,7 @@ from tornado.log import enable_pretty_logging
 from dotenv import load_dotenv
 from typing import Any
 
+import carcass
 import config
 import protocol
 import db
@@ -339,6 +340,131 @@ class World:
                 free += 1
         return max(0, min(wanted, free))
 
+    def _food_buckets(self, cell):
+        """Bucket pellets into a uniform grid of `cell`-sized squares.
+
+        Both gravity passes only ever care about pellets within one cell of
+        each other, so this keeps them O(n * neighbours). The naive all-pairs
+        form would be a million distance checks per tick at FOOD_MAX.
+        """
+        buckets = defaultdict(list)
+        for fid, food in self.foods.items():
+            buckets[(int(food["x"] // cell), int(food["y"] // cell))].append(fid)
+        return buckets
+
+    def _food_neighbours(self, buckets, cx, cy):
+        """Pellet ids in the 3x3 block of cells around (cx, cy)."""
+        for gx in (cx - 1, cx, cx + 1):
+            for gy in (cy - 1, cy, cy + 1):
+                bucket = buckets.get((gx, gy))
+                if bucket:
+                    yield from bucket
+
+    def _attract_food(self, dt):
+        """Drift pellets toward the pull of their neighbours.
+
+        The pull is mass-weighted, so crumbs fall into blobs rather than
+        everything sliding equally, and a pellet's own drift speed falls off
+        with its value -- a fat blob is sluggish and acts as the anchor.
+        Positions are read before any are written, so the pass is
+        simultaneous and does not depend on dict order.
+
+        Only one shard of pellets moves per tick (ids are handed out in
+        sequence, so a carcass spreads itself evenly across the rota). The
+        step is scaled by the shard count to keep the effective speed the
+        same as moving everything every tick -- sharding is a cost trick,
+        not a speed one. Bucketing still walks every pellet, since a moving
+        pellet is pulled by stationary neighbours too, but that is a plain
+        dict insert; the 3x3 neighbourhood scan is the part being amortised.
+        """
+        shards = max(1, config.FOOD_GRAVITY_SHARDS)
+        turn = self.tick_count % shards
+        step_dt = dt * shards
+        cell = config.FOOD_ATTRACT_RADIUS
+        buckets = self._food_buckets(cell)
+        reach2 = cell * cell
+        moves = []
+        for fid, food in self.foods.items():
+            if int(fid) % shards != turn:
+                continue
+            fx, fy = food["x"], food["y"]
+            ax = ay = 0.0
+            cx, cy = int(fx // cell), int(fy // cell)
+            for nid in self._food_neighbours(buckets, cx, cy):
+                if nid == fid:
+                    continue
+                other = self.foods[nid]
+                dx = other["x"] - fx
+                dy = other["y"] - fy
+                d2 = dx * dx + dy * dy
+                if 0.0 < d2 < reach2:
+                    # Weight by the neighbour's mass, normalised by distance so
+                    # this is a direction, not an inverse-square blow-up at
+                    # point-blank range (pellets sit on top of each other in a
+                    # fresh carcass).
+                    inv = other["value"] / math.sqrt(d2)
+                    ax += dx * inv
+                    ay += dy * inv
+            mag = math.hypot(ax, ay)
+            if mag <= 0.0:
+                continue
+            speed = config.FOOD_ATTRACT_SPEED / math.sqrt(food["value"])
+            step = speed * step_dt
+            moves.append((fid, fx + ax / mag * step, fy + ay / mag * step))
+        for fid, nx, ny in moves:
+            food = self.foods[fid]
+            food["x"] = min(float(config.MAP_WIDTH), max(0.0, nx))
+            food["y"] = min(float(config.MAP_HEIGHT), max(0.0, ny))
+
+    def _merge_food(self):
+        """Combine pellets that have drifted into contact.
+
+        Value is conserved exactly (a blob is worth its crumbs), while the
+        radius grows by area -- sqrt(r1^2 + r2^2) -- so blobs stay compact
+        instead of ballooning linearly and swallowing the screen. Growth
+        stops at FOOD_MERGE_MAX_RADIUS so no single blob can eat the map.
+
+        Only one shard initiates merges per tick, which flattens the spike
+        when a whole carcass lands wanting to fuse at once. Neighbours are
+        still drawn from every pellet, so a touching pair fuses as soon as
+        either side's turn comes round -- at worst a shard-rota later.
+        """
+        shards = max(1, config.FOOD_GRAVITY_SHARDS)
+        turn = self.tick_count % shards
+        cell = max(1.0, config.FOOD_MERGE_MAX_RADIUS * 2.0)
+        buckets = self._food_buckets(cell)
+        consumed = set()
+        for fid in list(self.foods.keys()):
+            if fid in consumed or int(fid) % shards != turn:
+                continue
+            food = self.foods[fid]
+            if food["r"] >= config.FOOD_MERGE_MAX_RADIUS:
+                continue
+            cx, cy = int(food["x"] // cell), int(food["y"] // cell)
+            for nid in self._food_neighbours(buckets, cx, cy):
+                if nid == fid or nid in consumed:
+                    continue
+                other = self.foods.get(nid)
+                if other is None:
+                    continue
+                touch = (food["r"] + other["r"]) * config.FOOD_MERGE_OVERLAP
+                if math.hypot(other["x"] - food["x"], other["y"] - food["y"]) >= touch:
+                    continue
+                m1, m2 = food["value"], other["value"]
+                total = m1 + m2
+                food["x"] = (food["x"] * m1 + other["x"] * m2) / total
+                food["y"] = (food["y"] * m1 + other["y"] * m2) / total
+                food["value"] = total
+                food["r"] = min(config.FOOD_MERGE_MAX_RADIUS,
+                                math.hypot(food["r"], other["r"]))
+                # Stay evictable if either half was a carcass crumb, so
+                # merging cannot launder drops past the FOOD_MAX backstop.
+                food["dropped"] = food["dropped"] or other["dropped"]
+                consumed.add(nid)
+                del self.foods[nid]
+                if food["r"] >= config.FOOD_MERGE_MAX_RADIUS:
+                    break
+
     def _spawn_food(self):
         # Spawn inside a circle centered on the map so new food appears in a
         # consistent, discoverable region (the client draws its border).
@@ -397,6 +523,8 @@ class World:
                 player.strategy.think(self, player)
             player.step(dt)
         self._spawn_timer(dt)
+        self._attract_food(dt)
+        self._merge_food()
         self._handle_food()
         self._handle_collisions()
         self._broadcast_snapshot()
@@ -466,8 +594,13 @@ class World:
         )
 
     def _drop_carcass(self, player):
-        """Scatter food pellets along the dead serpent's body -- one per
-        segment, sized from its girth. Dropped pellets render at low opacity."""
+        """Scatter food pellets from the dead serpent's body.
+
+        The pellets are thrown clear of the spine in one of the shapes in
+        carcass.py, picked at random so deaths stay visually varied, then
+        pellet gravity pulls the mess back together over the next few
+        seconds. Dropped pellets render at low opacity.
+        """
         drop_r = player.girth * config.DROP_RADIUS_FACTOR
         value = _value_for_radius(drop_r)
         pts = player.points
@@ -480,8 +613,16 @@ class World:
             indices = list(range(len(pts)))
         # Respect the global FOOD_MAX cap, evicting old crumbs to make room.
         indices = indices[:self._make_room(len(indices))]
-        for i in indices:
-            px, py = pts[i]
+        if not indices:
+            return
+        scatter = random.choice(carcass.REGISTRY)
+        spread = player.girth * config.CARCASS_SPREAD_FACTOR
+        placed = scatter([pts[i] for i in indices], spread)
+        logging.info(f"Carcass scattered as {scatter.__name__} ({len(placed)} pellets)")
+        for px, py in placed:
+            # A wide scatter near an edge can throw pellets off-map.
+            px = min(float(config.MAP_WIDTH), max(0.0, px))
+            py = min(float(config.MAP_HEIGHT), max(0.0, py))
             self._make_food(px, py, drop_r, value, True)
 
     def _persist_life(self, player):
