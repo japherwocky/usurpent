@@ -43,7 +43,7 @@ The client is a Vite + Svelte app in `web/`.
 
 - Develop: `cd web && npm install && npm run dev`. Vite serves the app on its
   dev port and proxies `/ws` (and `/api`) to the Tornado server (default
-  `http://localhost:8011`).
+  `http://localhost:55555`).
 - Ship: `cd web && npm run build` writes `web/dist`; run `usurpent.py` and
   Tornado serves `web/dist` with an `index.html` fallback for client routes.
 

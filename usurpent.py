@@ -776,7 +776,7 @@ class SpaStaticFileHandler(tornado.web.StaticFileHandler):
 
 def main():
     from tornado.options import define, options
-    define("port", default=int(os.getenv('PORT', 8011)), help="run on the given port", type=int)
+    define("port", default=int(os.getenv('PORT', 55555)), help="run on the given port", type=int)
     define("debug", default=os.getenv('DEBUG', 'False').lower() == 'true', help="run server in debug mode", type=bool)
     define("runtests", default=False, help="run tests", type=bool)
 

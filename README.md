@@ -1,167 +1,194 @@
 # USURPENT
 
-A multiplayer snake-like MMO game built with Python/Tornado backend and JavaScript/D3.js frontend.
+A real-time, multiplayer snake game. The server is authoritative: it runs a
+fixed-tick simulation and streams snapshots over WebSocket. Clients send only
+a steering direction and render with local prediction/interpolation.
 
 ## Overview
 
-USURPENT is a real-time multiplayer game where players control entities that move through a shared game space. The project demonstrates client-server game architecture with smooth animations and particle effects using D3.js for visualization.
+USURPENT is a real-time multiplayer game where players steer a growing
+serpent through a shared game space, eating food and avoiding other players'
+trails. The backend simulation is the single source of truth; the frontend is
+a thin renderer.
 
 ## Features
 
-- **Real-time multiplayer gameplay** - Multiple players can join and interact in the same game space
-- **Smooth animations** - Uses D3.js for fluid entity movement and particle effects
-- **Mouse-controlled movement** - Entities follow mouse cursor with physics-based movement
-- **Particle system** - Dynamic particle effects with color shifting and rotation
-- **Responsive design** - Scales to different screen sizes
-- **Web-based** - Runs entirely in the browser with no additional client software
+- **Real-time multiplayer gameplay** - players and AI bots share the same
+  simulated world, broadcast over WebSocket at a fixed tick rate
+- **Client-side prediction & interpolation** - smooth movement despite
+  network latency, reconciled against authoritative server snapshots
+- **Mouse-controlled steering** - snakes turn toward the mouse offset from
+  screen center, with server-capped turn rate
+- **Accounts** - optional registration/login; guests can play without one
+- **Web-based** - runs entirely in the browser with no additional client
+  software
 
 ## Technology Stack
 
 ### Backend
-- **Python 3** - Core language
-- **Tornado** - Async web framework for real-time applications
-- **Markdown** - For documentation rendering
+- **Python 3.12** - core language
+- **Tornado** - async web framework, serves the HTTP API and the `/ws`
+  WebSocket endpoint, and runs the authoritative game loop
+- **Peewee + SQLite** - account storage
+- **bcrypt** - password hashing
 
 ### Frontend
-- **JavaScript (ES6+)** - Game logic and client-side functionality
-- **D3.js v7** - Data visualization and animations
-- **HTML5/CSS3** - Structure and styling
-- **SVG** - Game rendering
+- **Vite + Svelte** - dev server and build tooling for the client
+- **Canvas 2D** - game rendering, head-centered camera
+- **JavaScript (ES6+)** - netcode (prediction/interpolation), UI
 
 ## Project Structure
 
 ```
 usurpent/
-├── usurpent.py          # Main Tornado application server + WebSocket handler
-├── config.py            # Gameplay tuning knobs (env-overridable, no magic numbers)
-├── protocol.py          # WebSocket message types and field names
-├── requirements.txt     # Python dependencies
-├── Makefile            # Build and development commands
-├── static/
-│   └── game.js         # Frontend game logic (WS client, prediction, rendering)
-├── templates/
-│   └── index.html      # Main game interface
-└── README.md           # This file
+├── usurpent.py          # Tornado app: World (sim), Player, GameWebSocketHandler (/ws), App
+├── config.py             # Gameplay tuning knobs (USURPENT_* env-overridable, no magic numbers)
+├── protocol.py            # WebSocket message types and field names
+├── db.py                  # Peewee SqliteDatabase + init_db()
+├── models.py               # Account model (bcrypt password helpers)
+├── bots.py                  # AI bot behaviors
+├── requirements.txt          # Python dependencies (runtime only)
+├── Makefile                   # Backend build/dev commands (Unix-style paths)
+├── web/                        # Vite + Svelte frontend
+│   ├── src/
+│   │   ├── App.svelte
+│   │   └── lib/
+│   │       ├── Lobby.svelte     # Name entry / auth screen
+│   │       ├── Auth.svelte      # Login / register forms
+│   │       ├── Game.svelte      # Canvas renderer
+│   │       ├── netcode.js       # Prediction/interpolation
+│   │       └── api.js           # HTTP API client
+│   └── dist/                    # Production build output (gitignored)
+├── templates/ + static/game.js  # Retired vanilla D3 client (historical reference only)
+└── README.md
 ```
 
 ## Installation & Setup
 
 ### Prerequisites
-- Python 3.6+
-- pip (Python package manager)
+- Python 3.12
+- Node.js (for the frontend)
 
 ### Quick Start
 
 1. **Clone the repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/japherwocky/usurpent.git
    cd usurpent
    ```
 
-2. **Set up the development environment**
-   ```bash
-   make init
-   ```
-   This creates a virtual environment and installs dependencies.
-
-3. **Run the development server**
-   ```bash
-   make dev
-   ```
-   The server will start on `http://localhost:8001` with debug mode enabled.
-
-4. **Run in production mode**
-   ```bash
-   make demo
-   ```
-
-### Manual Setup
-
-If you prefer not to use the Makefile:
-
-1. Create virtual environment:
+2. **Set up the backend environment**
    ```bash
    python3 -m venv ./env
-   source ./env/bin/activate  # On Windows: .\env\Scripts\activate
+   ./env/bin/pip install -r requirements.txt   # Windows: ./env/Scripts/pip.exe
    ```
 
-2. Install dependencies:
+3. **Configure environment variables**
    ```bash
-   pip install -r requirements.txt
+   cp .env.example .env
+   # generate a real cookie secret:
+   python -c "import secrets; print(secrets.token_hex(32))"
    ```
 
-3. Run the server:
+4. **Run the backend**
    ```bash
-   python usurpent.py --port=8001 --debug
+   ./env/bin/python usurpent.py --debug   # Windows: ./env/Scripts/python.exe
    ```
+   Starts on `http://localhost:55555` (override with `--port` or `PORT` in `.env`).
+
+5. **Run the frontend (separate terminal)**
+   ```bash
+   cd web
+   npm install
+   npm run dev
+   ```
+   Vite serves the app and proxies `/api` and `/ws` to the backend. Open the
+   URL Vite prints (typically `http://localhost:5173`).
+
+### Production build
+
+```bash
+cd web && npm run build   # writes web/dist
+cd .. && ./env/bin/python usurpent.py
+```
+Tornado serves `web/dist` directly, with an `index.html` fallback for client
+routes - no separate frontend server needed.
 
 ## Usage
 
-1. Start the server as described above
-2. Open your browser and navigate to `http://localhost:8001`
-3. Enter your player name and click "PLAY"
-4. Move your mouse to control your entity
-5. Watch as particles swirl around and your entity follows the cursor
+1. Start the backend and frontend dev server as described above
+2. Open the Vite dev URL and pick a name (or leave it blank for a random one)
+3. Click **PLAY**
+4. Move your mouse to steer; click and hold (or hold a key) to boost
+5. Right-click for the debug/leaderboard overlay
 
 ## Game Mechanics
 
-- **Entity Movement**: Your entity (colored circle with a trailing tail) steers toward your mouse cursor; the server caps turn rate so trails curve smoothly
-- **Particle System**: Background particles rotate and shift colors continuously
-- **Real-time Updates**: The server simulates at 20 Hz and broadcasts snapshots; the client glides between them
-- **Coordinate System**: A 1000×1000 logical map scaled to the viewport with D3.js
+- **Steering**: the server caps turn rate, so trails curve smoothly rather
+  than snapping to the cursor
+- **Collision**: head-vs-other-body kills; your own tail is ignored. Tune
+  `COLLISION_RADIUS` in `config.py`
+- **Score**: food pickups increment score; resets on death
+- **Simulation**: the server runs a fixed-tick loop and broadcasts full-state
+  snapshots; the client interpolates between them
 
 ## Development
 
-### Available Commands
+### Available commands (backend, from `Makefile`)
 
-- `make init` - Set up development environment
-- `make dev` - Run development server with debug mode
-- `make demo` - Run production server
-- `make test` - Run test suite
-- `make clean` - Remove virtual environment
+- `make init` - set up the Python virtualenv and install dependencies
+- `make dev` - run the backend with debug mode enabled
+- `make demo` - run the backend in production mode
+- `make clean` - remove the virtualenv
+
+The Makefile assumes a Unix-style venv layout (`./env/bin/...`). On Windows,
+run the equivalent commands directly against `./env/Scripts/python.exe`.
+
+### Frontend commands (from `web/`)
+
+- `npm run dev` - Vite dev server with HMR, proxying `/api` and `/ws` to the
+  backend
+- `npm run build` - production build to `web/dist`
+- `npm run preview` - preview the production build locally
 
 ### Configuration
 
-The server can be configured with command-line options:
+Gameplay constants live in `config.py` and are overridable via `USURPENT_*`
+environment variables - no magic numbers elsewhere in the codebase.
 
-- `--port=PORT` - Set server port (default: 8001)
-- `--debug` - Enable debug mode for development
-- `--runtests` - Run the test suite
+Server-level config comes from `.env` (copy `.env.example` to start):
 
-### Code Structure
+- `COOKIE_SECRET` - session cookie signing key
+- `PORT` - backend port (default 55555)
+- `DEBUG` - enable Tornado debug mode / autoreload
 
-- **usurpent.py**: Main Tornado application with URL routing and request handlers
-- **static/game.js**: Complete game implementation including:
-  - Entity management and physics
-  - Particle system
-  - Mouse interaction handling
-  - D3.js visualization setup
-- **templates/index.html**: Game interface with login screen and SVG canvas
+## HTTP API (auth)
 
-## Network Architecture
+- `POST /api/register` - `{username, password, email?}` → `{ok, username}`
+- `POST /api/login` - `{username, password}` → `{ok, username}`
+- `POST /api/logout` - clears the session
+- `GET /api/me` - `{guest: true}` or `{guest: false, username, high_score, games_played}`
 
-The project includes a network demo (`static/netcodedemo.html`) that demonstrates:
-- Client-server communication patterns
-- Lag simulation and compensation
-- Entity interpolation
-- Client-side prediction and server reconciliation
-
-This demo is based on Gabriel Gambetta's fast-paced multiplayer series and provides insights into real-time networking challenges.
+Auth uses Tornado secure cookies plus XSRF protection. Errors are JSON
+(`{"error": "..."}`) with a matching status code.
 
 ## Contributing
 
-This project welcomes contributions. Current state and areas for improvement:
-1. **Multiplayer** - Real-time multiplayer works (WebSocket + server-authoritative simulation). Try it: run the server and open two browser tabs.
-2. **Collision detection** - Head-vs-other-body kills; own tail is ignored. Tune `COLLISION_RADIUS` in `config.py`.
-3. **Score system** - Food pickups increment score; resets on death.
-4. **Game modes** - Different gameplay variations (not yet built).
-5. **Performance optimization** - Snapshot broadcast is full-state; fine for < 20 players, delta-compress later if needed.
-6. **Mobile support** - Touch controls for mobile devices (not yet built).
+This is an active solo side project. Current areas for improvement:
+
+1. **Game modes** - different gameplay variations (not yet built)
+2. **Performance** - snapshot broadcast is full-state; fine for a small
+   number of players, delta-compress later if needed
+3. **Mobile support** - touch controls (not yet built)
+4. **Tests** - no automated test suite yet
+
+See `AGENTS.md` for conventions and the kanban board used to track work.
 
 ## License
 
-No explicit license is provided. Please contact the original author for usage permissions.
+No explicit license is provided. Please contact the original author for
+usage permissions.
 
 ## Author
 
-Originally created by Japherwocky. The project appears to be abandoned but serves as an excellent example of real-time web game development.
+Created by Japherwocky.

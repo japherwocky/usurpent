@@ -12,10 +12,10 @@ export default defineConfig({
     watchOptions: { usePolling: true },
     proxy: {
       '/api': {
-        target: 'http://localhost:8011',
+        target: 'http://localhost:55555',
       },
       '/ws': {
-        target: 'ws://localhost:8011',
+        target: 'ws://localhost:55555',
         ws: true,
       },
     },
