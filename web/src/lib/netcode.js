@@ -32,6 +32,15 @@ export function colorFor(id) {
   return PALETTE[h % PALETTE.length];
 }
 
+// The color a serpent renders as: bots by strategy so competing AIs are easy
+// to tell apart, humans by a stable hash of their id. Carcass pellets are
+// tinted with this too, so you can see whose remains you are eating.
+export function serpentColor(player) {
+  return player.is_bot && player.strategy && STRATEGY_COLORS[player.strategy]
+    ? STRATEGY_COLORS[player.strategy]
+    : colorFor(player.id);
+}
+
 function wrapAngle(a) {
   while (a > Math.PI) a -= 2 * Math.PI;
   while (a <= -Math.PI) a += 2 * Math.PI;

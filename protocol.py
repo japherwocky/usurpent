@@ -45,5 +45,11 @@ FIELD_GUEST = "guest"
 FIELD_GIRTH = "girth"
 FIELD_FOOD_RADIUS = "r"
 FIELD_FOOD_DROPPED = "dropped"
+# Id of the serpent a carcass pellet came from, so the client can tint it that
+# serpent's color. Only present on dropped pellets. The client already has the
+# whole player list each snapshot, so it resolves the color itself rather than
+# us duplicating the palette server-side; one short field keeps food -- the
+# dominant term in snapshot size -- cheap.
+FIELD_FOOD_OWNER = "own"
 FIELD_IS_BOT = "is_bot"
 FIELD_STRATEGY = "strategy"

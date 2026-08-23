@@ -37,7 +37,9 @@ MAP_HEIGHT = _env_int("USURPENT_MAP_HEIGHT", 10000)
 # Server simulation.
 TICK_HZ = _env_int("USURPENT_TICK_HZ", 20)
 HEAD_SPEED = _env_float("USURPENT_HEAD_SPEED", 80.0)           # units / second
-MAX_TURN_RATE = _env_float("USURPENT_MAX_TURN_RATE", 8.4)      # radians / second (base)
+# Minimum turning radius is HEAD_SPEED / MAX_TURN_RATE, so halving the rate
+# doubles how wide the tightest turn is.
+MAX_TURN_RATE = _env_float("USURPENT_MAX_TURN_RATE", 4.2)      # radians / second (base)
 TURN_GIRTH_FALLOFF = _env_float("USURPENT_TURN_GIRTH_FALLOFF", 0.4)  # max turn-rate loss at MAX_GIRTH
 # Boost: holding the boost control raises head speed by this factor. No cost
 # yet -- a natural follow-up is to drain length/score while boosting.
@@ -49,7 +51,10 @@ BOOST_MULTIPLIER = _env_float("USURPENT_BOOST_MULTIPLIER", 1.8)
 # max(MIN_SEGMENT_SPACING, girth * SEGMENT_SPACING_FACTOR).
 SEGMENT_SPACING_FACTOR = _env_float("USURPENT_SEGMENT_SPACING_FACTOR", 0.333)
 MIN_SEGMENT_SPACING = _env_float("USURPENT_MIN_SEGMENT_SPACING", 1.0)
-INITIAL_BODY_LENGTH = _env_int("USURPENT_INITIAL_BODY_LENGTH", 160)  # world units
+# Segment count is length / spacing, so these two knobs are what control how
+# long a serpent looks -- girth only sets how thick it is. Both were pulled
+# back by ~10x because snakes were reaching full length far too quickly.
+INITIAL_BODY_LENGTH = _env_int("USURPENT_INITIAL_BODY_LENGTH", 16)  # world units
 
 # Body girth: the snake's thickness in world units. It grows as the snake eats
 # and caps at MAX_GIRTH. Girth drives both the rendered body size and the
@@ -62,7 +67,7 @@ MAX_GIRTH = _env_float("USURPENT_MAX_GIRTH", 24.0)
 # Each pellet carries a radius and a value; bigger pellets are worth more
 # (value = round(radius / FOOD_RADIUS_PER_VALUE), minimum 1). Eating a pellet
 # adds `value` to score and `value * FOOD_GROWTH` to tail length.
-BODY_GROWTH = _env_int("USURPENT_BODY_GROWTH", 16)            # world-length units per pellet value
+BODY_GROWTH = _env_int("USURPENT_BODY_GROWTH", 2)             # world-length units per pellet value
 FOOD_COUNT = _env_int("USURPENT_FOOD_COUNT", 30)               # initial seed at start
 FOOD_BASE_RADIUS = _env_float("USURPENT_FOOD_BASE_RADIUS", 5.0)
 FOOD_RADIUS_PER_VALUE = _env_float("USURPENT_FOOD_RADIUS_PER_VALUE", 10.0)

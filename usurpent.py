@@ -303,9 +303,13 @@ class World:
         if self._callback is not None:
             self._callback.stop()
 
-    def _make_food(self, x, y, radius, value, dropped):
+    def _make_food(self, x, y, radius, value, dropped, owner=None):
         """Store one pellet. Foods are dicts so per-pellet radius/value/dropped
-        can vary (spawned vs. carcass)."""
+        can vary (spawned vs. carcass).
+
+        `owner` is the id of the serpent a carcass came from, so the client can
+        tint the pellet that serpent's color; spawned food leaves it None.
+        """
         self._food_next += 1
         fid = str(self._food_next)
         self.foods[fid] = {
@@ -314,6 +318,7 @@ class World:
             "r": radius,
             "value": value,
             "dropped": dropped,
+            "owner": owner,
         }
 
     def _make_room(self, wanted):
@@ -454,6 +459,10 @@ class World:
                 total = m1 + m2
                 food["x"] = (food["x"] * m1 + other["x"] * m2) / total
                 food["y"] = (food["y"] * m1 + other["y"] * m2) / total
+                # The heavier half decides the tint, so a blob reads as
+                # whichever serpent contributed most of it.
+                if m2 > m1:
+                    food["owner"] = other["owner"]
                 food["value"] = total
                 food["r"] = min(config.FOOD_MERGE_MAX_RADIUS,
                                 math.hypot(food["r"], other["r"]))
@@ -623,7 +632,7 @@ class World:
             # A wide scatter near an edge can throw pellets off-map.
             px = min(float(config.MAP_WIDTH), max(0.0, px))
             py = min(float(config.MAP_HEIGHT), max(0.0, py))
-            self._make_food(px, py, drop_r, value, True)
+            self._make_food(px, py, drop_r, value, True, owner=player.id)
 
     def _persist_life(self, player):
         """Write one life's stats to the linked Account (no-op for guests).
@@ -652,14 +661,21 @@ class World:
         logging.info(f"Player {player_id} respawned")
 
     def _food_list(self):
-        return [
-            {protocol.FIELD_ID: fid,
-             protocol.FIELD_X: round(f["x"], 2),
-             protocol.FIELD_Y: round(f["y"], 2),
-             protocol.FIELD_FOOD_RADIUS: round(f["r"], 2),
-             protocol.FIELD_FOOD_DROPPED: f["dropped"]}
-            for fid, f in self.foods.items()
-        ]
+        out = []
+        for fid, f in self.foods.items():
+            pellet = {
+                protocol.FIELD_ID: fid,
+                protocol.FIELD_X: round(f["x"], 2),
+                protocol.FIELD_Y: round(f["y"], 2),
+                protocol.FIELD_FOOD_RADIUS: round(f["r"], 2),
+                protocol.FIELD_FOOD_DROPPED: f["dropped"],
+            }
+            # Omitted entirely for spawned food: food is the dominant term in
+            # snapshot size, so an unused key on every pellet is not free.
+            if f["owner"] is not None:
+                pellet[protocol.FIELD_FOOD_OWNER] = f["owner"]
+            out.append(pellet)
+        return out
 
     def _snapshot(self):
         return {

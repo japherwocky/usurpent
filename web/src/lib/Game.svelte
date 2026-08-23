@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { Game, colorFor, PALETTE, STRATEGY_COLORS } from './netcode.js';
+  import { Game, colorFor, serpentColor, PALETTE, STRATEGY_COLORS } from './netcode.js';
 
   // Display name chosen in the lobby; sent to the server on connect.
   export let name = '';
@@ -134,9 +134,7 @@
       .map((p) => ({
         name: p.username || (p.is_bot ? 'Bot' : '???'),
         score: p.score,
-        color: p.is_bot && p.strategy && STRATEGY_COLORS[p.strategy]
-          ? STRATEGY_COLORS[p.strategy]
-          : colorFor(p.id),
+        color: serpentColor(p),
       }));
     stats = {
       fps: Math.round(fps),
@@ -252,11 +250,19 @@
     ctx.globalAlpha = 1;
 
     // Food. Pellets carry a radius; dropped (carcass) pellets render at lower
-    // opacity so they read differently from spawned food.
+    // opacity so they read differently from spawned food, and are tinted with
+    // the color of the serpent they fell from. The owner is usually still in
+    // the snapshot (ids survive respawn), so we reuse that serpent's exact
+    // color; once they disconnect we fall back to the id hash, which is what
+    // colorFor would have given a human anyway.
+    const byId = new Map(list.map((pl) => [pl.id, pl]));
     for (const f of game.foods) {
       const [fx, fy] = toScreen(f.x, f.y);
       ctx.globalAlpha = f.dropped ? 0.61 : 1.0;
-      ctx.fillStyle = '#ffd166';
+      const owner = f.own ? byId.get(f.own) : null;
+      ctx.fillStyle = owner ? serpentColor(owner)
+        : f.own ? colorFor(f.own)
+        : '#ffd166';
       ctx.beginPath();
       ctx.arc(fx, fy, (f.r || 10) * s, 0, Math.PI * 2);
       ctx.fill();
@@ -267,9 +273,7 @@
     // overlapping circles read as a scaling tube. The head is drawn on top.
     for (const pl of list) {
       // Bots are colored by their strategy; humans keep a random palette color.
-      const col = pl.is_bot && pl.strategy && STRATEGY_COLORS[pl.strategy]
-        ? STRATEGY_COLORS[pl.strategy]
-        : colorFor(pl.id);
+      const col = serpentColor(pl);
       const girthPx = (pl.girth || 6) * s;
 
       ctx.globalAlpha = pl.alive ? 1 : 0.3;
