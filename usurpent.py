@@ -315,6 +315,30 @@ class World:
             "dropped": dropped,
         }
 
+    def _make_room(self, wanted):
+        """Free space for up to `wanted` new pellets; return how many now fit.
+
+        FOOD_MAX is meant to be a global cap, but only the timed spawner
+        honoured it -- carcass drops called _make_food directly, so a busy
+        arena (bots die and respawn constantly) grew self.foods without
+        bound, and every snapshot carried the whole list.
+
+        Evict oldest-first so a fresh kill is still worth looting, and only
+        evict dropped crumbs: spawned pellets mark the central spawn circle
+        that players navigate by.
+        """
+        free = config.FOOD_MAX - len(self.foods)
+        if free >= wanted:
+            return wanted
+        # dicts preserve insertion order, so this walks oldest pellets first
+        for fid, food in list(self.foods.items()):
+            if free >= wanted:
+                break
+            if food["dropped"]:
+                del self.foods[fid]
+                free += 1
+        return max(0, min(wanted, free))
+
     def _spawn_food(self):
         # Spawn inside a circle centered on the map so new food appears in a
         # consistent, discoverable region (the client draws its border).
@@ -451,9 +475,11 @@ class World:
         # we don't flood the world with food.
         if len(pts) > config.CARCASS_MAX_PELLETS:
             step = len(pts) / config.CARCASS_MAX_PELLETS
-            indices = range(0, len(pts), max(1, int(step)))
+            indices = list(range(0, len(pts), max(1, int(step))))
         else:
-            indices = range(len(pts))
+            indices = list(range(len(pts)))
+        # Respect the global FOOD_MAX cap, evicting old crumbs to make room.
+        indices = indices[:self._make_room(len(indices))]
         for i in indices:
             px, py = pts[i]
             self._make_food(px, py, drop_r, value, True)
