@@ -243,14 +243,26 @@ function stepLocal(local, dt, target, mapW, mapH, sim, boost) {
   local.y = Math.max(0, Math.min(mapH, local.y));
 
   // Segment spacing scales with girth (matches the server) so the predicted
-  // trail density lines up with what the server renders.
+  // trail density lines up with what the server renders. Lay down every point
+  // the distance covered calls for, not one per frame: this runs at frame rate
+  // rather than the server's 20 Hz, so one-per-step put the points ~2.67 apart
+  // against a wanted 2.0 where the server managed 4.0 -- close enough to look
+  // right on its own and far enough out that reconciling against the server
+  // rewrote the whole body's geometry every snapshot.
   const spacing = Math.max(sim.minSegmentSpacing, g * sim.segmentSpacingFactor);
-  const last = local.points[local.points.length - 1];
-  if (Math.hypot(local.x - last[0], local.y - last[1]) >= spacing) {
-    local.points.push([local.x, local.y]);
-    const maxPoints = Math.max(1, Math.round((local.length || 0) / spacing) + 1);
-    while (local.points.length > maxPoints) local.points.shift();
+  const tail = local.points[local.points.length - 1];
+  let lx = tail[0];
+  let ly = tail[1];
+  let gap = Math.hypot(local.x - lx, local.y - ly);
+  while (gap >= spacing) {
+    const t = spacing / gap;
+    lx += (local.x - lx) * t;
+    ly += (local.y - ly) * t;
+    local.points.push([lx, ly]);
+    gap = Math.hypot(local.x - lx, local.y - ly);
   }
+  const maxPoints = Math.max(1, Math.round((local.length || 0) / spacing) + 1);
+  while (local.points.length > maxPoints) local.points.shift();
 }
 
 function renderState(st, alpha, sim) {

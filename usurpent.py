@@ -253,13 +253,30 @@ class Player:
         self.x = max(0.0, min(config.MAP_WIDTH, self.x))
         self.y = max(0.0, min(config.MAP_HEIGHT, self.y))
 
+        # Lay down as many points as the ground covered calls for, not one per
+        # tick. The head travels HEAD_SPEED / TICK_HZ in a tick -- 4 units, and
+        # 7.2 while boosting -- so a serpent whose spacing is 2 owes two or
+        # three points this tick. Appending a single one at the head's current
+        # position spaced the body by the TICK distance instead of by spacing
+        # whenever the head outran it, which is every thin serpent: measured at
+        # girth 6 the gaps came out 4.0 against a wanted 2.0, making the body
+        # twice the length it claimed and 3.6x while boosting. It also left the
+        # client disagreeing about the shape -- it runs the same loop 60 times a
+        # second, so it lands near 2.67 rather than 4.0, and reconcileLocal then
+        # swapped one sampling of the path for the other twenty times a second,
+        # which is what the body shimmer was.
         spacing = self._segment_spacing()
-        last = self.points[-1]
-        if math.hypot(self.x - last[0], self.y - last[1]) >= spacing:
-            self.points.append((self.x, self.y))
-            max_points = max(1, round(self.length / spacing) + 1)
-            while len(self.points) > max_points:
-                self.points.pop(0)
+        lx, ly = self.points[-1]
+        gap = math.hypot(self.x - lx, self.y - ly)
+        while gap >= spacing:
+            step = spacing / gap
+            lx += (self.x - lx) * step
+            ly += (self.y - ly) * step
+            self.points.append((lx, ly))
+            gap = math.hypot(self.x - lx, self.y - ly)
+        max_points = max(1, round(self.length / spacing) + 1)
+        while len(self.points) > max_points:
+            self.points.pop(0)
 
     def _turn_rate(self):
         """Max steering rate for this snake. Bigger girth -> wider turning
