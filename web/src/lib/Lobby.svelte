@@ -23,8 +23,18 @@
     { action: 'Stats', keys: ['right-click', 'L'] },
   ];
 
+  // The guest name. Only ever used while signed out -- a signed-in player is
+  // their account, see accountName below.
   let name = randomName();
   let touched = false;
+  let session = null;
+
+  // Signed in, there is no name to choose: you are your account. Leaving the
+  // field editable meant the lobby showed two identities at once, and since
+  // the server prefers a client-supplied name over the account
+  // (usurpent.py:925) you could play as "LazyEel" while the score was
+  // credited to "japherwocky".
+  $: accountName = session && !session.guest && session.username ? session.username : null;
 
   // Shown under the field only once the player has typed something invalid,
   // so a first-time visitor sees a clean form rather than a rule they have
@@ -32,19 +42,15 @@
   $: invalid = touched && name.length > 0 && !NAME_RE.test(name);
 
   onMount(() => {
-    // Remember the last name a returning player used.
+    // Remember the last name a returning player used. This is the guest name
+    // and stays that way: signing in does not overwrite it, so signing out
+    // hands the player back the handle they had.
     const saved = localStorage.getItem('usurpent.name');
-    if (saved) {
-      name = saved;
-      touched = true;
-    }
+    if (saved) name = saved;
   });
 
-  // When a player logs in, default the name to their account (unless they've
-  // already typed their own).
   function onSession(e) {
-    const s = e.detail;
-    if (s && !s.guest && s.username && !touched) name = s.username;
+    session = e.detail;
   }
 
   function shuffle() {
@@ -53,6 +59,10 @@
   }
 
   function play() {
+    if (accountName) {
+      dispatch('play', { name: accountName });
+      return;
+    }
     let n = (name || '').trim();
     if (!NAME_RE.test(n)) n = randomName();
     localStorage.setItem('usurpent.name', n);
@@ -69,24 +79,31 @@
     </header>
 
     <div class="name">
-      <div class="name-row">
-        <input
-          bind:value={name}
-          on:input={() => (touched = true)}
-          on:keydown={(e) => e.key === 'Enter' && play()}
-          maxlength="32"
-          autocomplete="off"
-          spellcheck="false"
-          aria-label="Your serpent name"
-          aria-invalid={invalid}
-          placeholder="your serpent name"
-        />
-        <button type="button" class="shuffle" on:click={shuffle} title="Pick a random name">
-          ⟳
-        </button>
-      </div>
-      {#if invalid}
-        <span class="hint bad">3–32 characters: letters, numbers, _ or -</span>
+      {#if accountName}
+        <div class="identity">
+          <span class="as">Playing as</span>
+          <span class="who">{accountName}</span>
+        </div>
+      {:else}
+        <div class="name-row">
+          <input
+            bind:value={name}
+            on:input={() => (touched = true)}
+            on:keydown={(e) => e.key === 'Enter' && play()}
+            maxlength="32"
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="Your serpent name"
+            aria-invalid={invalid}
+            placeholder="your serpent name"
+          />
+          <button type="button" class="shuffle" on:click={shuffle} title="Pick a random name">
+            ⟳
+          </button>
+        </div>
+        {#if invalid}
+          <span class="hint bad">3–32 characters: letters, numbers, _ or -</span>
+        {/if}
       {/if}
     </div>
 
@@ -164,6 +181,31 @@
   .name-row {
     display: flex;
     gap: 0.4rem;
+  }
+  /* Sized to match the guest name field, so the card doesn't jump height
+     when a session resolves or the player signs out. */
+  .identity {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.6rem 0.65rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--sunken);
+  }
+  .identity .as {
+    flex: none;
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+  }
+  .identity .who {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    color: var(--accent-hi);
   }
   input {
     flex: 1;
