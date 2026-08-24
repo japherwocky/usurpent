@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { Game, colorFor, serpentColor, PALETTE, STRATEGY_COLORS } from './netcode.js';
+  import { Game, foodColor, serpentColor, PALETTE, STRATEGY_COLORS } from './netcode.js';
 
   // Display name chosen in the lobby; sent to the server on connect.
   export let name = '';
@@ -345,22 +345,18 @@
     }
     ctx.globalAlpha = 1;
 
-    // Food. Pellets carry a radius; dropped (carcass) pellets render at lower
-    // opacity so they read differently from spawned food, and are tinted with
-    // the color of the serpent they fell from. The owner is usually still in
-    // the snapshot (ids survive respawn), so we reuse that serpent's exact
-    // color; once they disconnect we fall back to the id hash, which is what
-    // colorFor would have given a human anyway.
-    const byId = new Map(list.map((pl) => [pl.id, pl]));
+    // Food. Pellets are colored by SIZE, ramped across the range the server
+    // reports in the welcome: a crumb is lime, a blob that has merged its way
+    // to the cap is red. Size is the thing a player is deciding on -- whether
+    // that speck across the map is worth the trip -- and every pellet used to
+    // be the same flat amber. Dropped (carcass) pellets keep their lower
+    // opacity, so a fresh kill still reads differently from spawned food.
     for (const f of game.foods) {
       const fr = f.r || 10;
       if (!visible(f.x, f.y, fr)) continue;
       const [fx, fy] = toScreen(f.x, f.y);
       ctx.globalAlpha = f.dropped ? 0.61 : 1.0;
-      const owner = f.own ? byId.get(f.own) : null;
-      ctx.fillStyle = owner ? serpentColor(owner)
-        : f.own ? colorFor(f.own)
-        : '#ffd166';
+      ctx.fillStyle = foodColor(fr, game.foodMinRadius, game.foodMaxRadius);
       ctx.beginPath();
       ctx.arc(fx, fy, fr * s, 0, Math.PI * 2);
       ctx.fill();
@@ -534,6 +530,11 @@
         {/each}
         <li><span class="swatch" style="background:linear-gradient(90deg,#1f77b4,#ff7f0e)"></span>humans</li>
       </ul>
+      <h2>Pellet size</h2>
+      <div class="ramp">
+        <span class="bar"></span>
+        <span class="ends"><i>crumb</i><i>blob</i></span>
+      </div>
     </div>
   {/if}
 
@@ -769,6 +770,24 @@
     align-items: center;
     gap: 0.4rem;
     padding: 0.08rem 0;
+  }
+  /* Mirrors FOOD_RAMP in netcode.js -- keep the two in step. */
+  .ramp .bar {
+    display: block;
+    height: 7px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #a3e635, #facc15, #fb923c, #dc2626);
+  }
+  .ramp .ends {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.15rem;
+    font-size: 0.62rem;
+    font-style: normal;
+    color: var(--ink-faint);
+  }
+  .ramp .ends i {
+    font-style: normal;
   }
 
   /* --- Death card ------------------------------------------------------- */

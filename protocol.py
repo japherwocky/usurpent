@@ -49,6 +49,12 @@ FIELD_TURN_GIRTH_FALLOFF = "turn_girth_falloff"
 # in the welcome so the client can time the death card's button instead of
 # hardcoding a number the server owns.
 FIELD_RESPAWN_DELAY = "respawn_delay"
+# The range of pellet radii the server can produce: a freshly spawned crumb
+# and a blob that has merged its way to the cap. The client ramps pellet
+# colour across this, so it has to be told the real ends rather than baking
+# in a guess that silently drifts when the food constants are retuned.
+FIELD_FOOD_MIN_RADIUS = "food_min_radius"
+FIELD_FOOD_MAX_RADIUS = "food_max_radius"
 
 # Per-player fields inside a snapshot's player list.
 FIELD_ID = "id"

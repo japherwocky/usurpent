@@ -41,6 +41,62 @@ export function serpentColor(player) {
     : colorFor(player.id);
 }
 
+// Pellet colour runs on SIZE, not identity: a fresh crumb is cool lime and a
+// blob that has merged its way to the cap runs red-hot, so what is worth
+// crossing the map for reads at a glance. The low end stays bright on
+// purpose -- a crumb is a couple of pixels across, and a perceptual ramp like
+// viridis would put its darkest stop on the smallest, least visible thing on
+// screen. The top end stays clear of the seeker bots' #ff4d6d.
+const FOOD_RAMP = [
+  [163, 230, 53],  // lime   -- a spawned crumb
+  [250, 204, 21],  // amber
+  [251, 146, 60],  // orange
+  [220, 38, 38],   // red    -- a blob at FOOD_MERGE_MAX_RADIUS
+];
+
+// Baked into a lookup table at module load: foodColor runs once per visible
+// pellet per frame, and building a css colour string each time would churn
+// thousands of short-lived strings a second for colours that never change.
+const FOOD_STEPS = 48;
+const FOOD_COLORS = (() => {
+  const out = [];
+  const last = FOOD_RAMP.length - 1;
+  for (let i = 0; i < FOOD_STEPS; i++) {
+    const seg = (i / (FOOD_STEPS - 1)) * last;
+    const lo = Math.min(last - 1, Math.floor(seg));
+    const f = seg - lo;
+    const a = FOOD_RAMP[lo];
+    const b = FOOD_RAMP[lo + 1];
+    out.push(
+      `rgb(${Math.round(a[0] + (b[0] - a[0]) * f)},` +
+        `${Math.round(a[1] + (b[1] - a[1]) * f)},` +
+        `${Math.round(a[2] + (b[2] - a[2]) * f)})`
+    );
+  }
+  return out;
+})();
+
+// Radius grows by AREA on every merge -- sqrt(r1^2 + r2^2) -- so reaching the
+// cap from a spawned crumb takes on the order of 289 of them, and pellet
+// radii pile up against the bottom of the range. Ramped linearly the whole
+// field came out one shade of lime: a blob of twenty-five fused crumbs still
+// sat at t=0.25. Taking the root of the fraction spends the palette where the
+// pellets actually are, and because the growth is quadratic it means one step
+// of colour is roughly one doubling of crumbs rather than of width.
+const FOOD_RAMP_GAMMA = 0.5;
+
+// Colour for a pellet of this radius. The ends come from the welcome
+// (FOOD_BASE_RADIUS and FOOD_MERGE_MAX_RADIUS) so the ramp spans whatever
+// range the server actually produces, rather than a constant here that goes
+// quietly wrong the next time the food is retuned.
+export function foodColor(r, minR, maxR) {
+  const span = maxR - minR;
+  let t = span > 0 ? (r - minR) / span : 0;
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+  return FOOD_COLORS[Math.round(t ** FOOD_RAMP_GAMMA * (FOOD_STEPS - 1))];
+}
+
 function wrapAngle(a) {
   while (a > Math.PI) a -= 2 * Math.PI;
   while (a <= -Math.PI) a += 2 * Math.PI;
@@ -246,6 +302,9 @@ export class Game {
     // respawn request. The death card greys its button for the same interval;
     // the real value arrives in the welcome so the two cannot drift apart.
     this.respawnDelay = 1.5;
+    // Ends of the pellet colour ramp, replaced from the welcome.
+    this.foodMinRadius = 2;
+    this.foodMaxRadius = 34;
     this.onScore = null; // (score:number) => void, called when self score changes
   }
 
@@ -267,6 +326,8 @@ export class Game {
     if (msg.segment_spacing_factor !== undefined) this.sim.segmentSpacingFactor = msg.segment_spacing_factor;
     if (msg.min_segment_spacing !== undefined) this.sim.minSegmentSpacing = msg.min_segment_spacing;
     if (msg.respawn_delay !== undefined) this.respawnDelay = msg.respawn_delay;
+    if (msg.food_min_radius !== undefined) this.foodMinRadius = msg.food_min_radius;
+    if (msg.food_max_radius !== undefined) this.foodMaxRadius = msg.food_max_radius;
     this.players = {};
     msg.players.forEach((p) => (this.players[p.id] = makeState(p, this.selfId)));
     this.foods = msg.food || [];

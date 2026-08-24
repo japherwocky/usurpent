@@ -892,6 +892,8 @@ class World:
             protocol.FIELD_MAX_GIRTH: config.MAX_GIRTH,
             protocol.FIELD_TURN_GIRTH_FALLOFF: config.TURN_GIRTH_FALLOFF,
             protocol.FIELD_RESPAWN_DELAY: config.RESPAWN_DELAY,
+            protocol.FIELD_FOOD_MIN_RADIUS: config.FOOD_BASE_RADIUS,
+            protocol.FIELD_FOOD_MAX_RADIUS: config.FOOD_MERGE_MAX_RADIUS,
             protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
             # Same interest slice as a snapshot, so a joining client is not
             # handed the whole map once and then quietly cut back to its

@@ -136,8 +136,12 @@ DROP_RADIUS_FACTOR = _env_float("USURPENT_DROP_RADIUS_FACTOR", 0.4)    # carcass
 CARCASS_MAX_PELLETS = _env_int("USURPENT_CARCASS_MAX_PELLETS", 400)    # sample if longer
 # Pellets are thrown clear of the spine in one of the shapes in carcass.py,
 # picked at random per death. Spread scales with girth, so a big serpent
-# leaves a correspondingly big mess.
-CARCASS_SPREAD_FACTOR = _env_float("USURPENT_CARCASS_SPREAD_FACTOR", 6.0)
+# leaves a correspondingly big mess. This is the width of the ribbon the
+# pattern draws around the body path: at 6.0 a maxed serpent threw its crumbs
+# 144 units clear, a quarter of the 600 units of world a client can see, so
+# the shapes were technically there and far too narrow to read as shapes.
+# At 16.0 the spray is 384 units across and a helix looks like a helix.
+CARCASS_SPREAD_FACTOR = _env_float("USURPENT_CARCASS_SPREAD_FACTOR", 16.0)
 # Serpents are only a handful of segments long now, so one pellet per segment
 # left too little for a scatter pattern to read as a pattern. Subdivide the
 # body path this many times before scattering to get the shape back.
