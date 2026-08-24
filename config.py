@@ -67,20 +67,30 @@ MAX_GIRTH = _env_float("USURPENT_MAX_GIRTH", 24.0)
 # the entire girth curve was dead weight. Expressed as a score it is a number
 # you can hold against the leaderboard and reason about.
 MAX_GIRTH_SCORE = _env_float("USURPENT_MAX_GIRTH_SCORE", 10000.0)
-GIRTH_PER_FOOD = (MAX_GIRTH - BASE_GIRTH) / max(1.0, MAX_GIRTH_SCORE)
+# Where the growth curve does its growing. Both girth and length run on
+# log1p(score / GROWTH_KNEE), normalised to reach their maximum at
+# MAX_GIRTH_SCORE, so this is the score around which growth stops feeling fast.
+# Linear was the wrong shape at both ends: on a ten-thousand point curve the
+# first hundred points moved a serpent one percent and felt like nothing, and
+# the last thousand were equally invisible for the opposite reason. On a log,
+# a new serpent grows visibly from its first few pellets -- the first hundred
+# points are worth about fifteen percent of the whole curve -- while the top of
+# the leaderboard still has somewhere to go.
+GROWTH_KNEE = _env_float("USURPENT_GROWTH_KNEE", 100.0)
 
 # Food.
 # Each pellet carries a radius and a value; bigger pellets are worth more
 # (value = round(radius / FOOD_RADIUS_PER_VALUE), minimum 1). Eating a pellet
 # adds `value` to score and `value * FOOD_GROWTH` to tail length.
-# World-length units of tail per point of pellet value. Segment count is
-# length / spacing, and _handle_collisions tests every head against every
-# point of every other body, so this constant sets the per-tick collision
-# cost as much as it sets how long a snake looks. At 2, bots on a 30k
-# leaderboard carried ~8000 points each and the measured snapshot interval
-# was 101 ms against a 50 ms budget -- the sim was running at half its tick
-# rate. A tenth of that puts the same serpent at ~800.
-BODY_GROWTH = _env_float("USURPENT_BODY_GROWTH", 0.2)         # world-length units per pellet value
+# Body length once a serpent has reached MAX_GIRTH_SCORE. With
+# INITIAL_BODY_LENGTH and GROWTH_KNEE this fixes the whole length curve, which
+# is derived from score rather than accumulated per pellet -- a curve cannot be
+# held by adding a constant per bite. Segment count is length / spacing, and
+# _handle_collisions tests every head against every point of every other body,
+# so this constant sets the per-tick collision cost as much as it sets how long
+# a serpent looks. The log curve also bounds the top end: past this score
+# length keeps growing, but slowly, instead of running away with the score.
+BODY_LENGTH_AT_MAX_GIRTH = _env_float("USURPENT_BODY_LENGTH_AT_MAX_GIRTH", 2000.0)
 FOOD_COUNT = _env_int("USURPENT_FOOD_COUNT", 4000)             # initial seed at start
 # A spawned pellet is the smallest thing on the map and the unit the rest of
 # the food scale is read against, so it wants to be visibly a crumb next to a

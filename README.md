@@ -131,10 +131,14 @@ routes - no separate frontend server needed.
   than snapping to the cursor
 - **Collision**: head-vs-other-body kills; your own tail is ignored. The
   hit distance is the two serpents' girths added, so bigger snakes are both
-  bulkier and easier to clip — tune via `BASE_GIRTH` / `GIRTH_PER_FOOD` /
-  `MAX_GIRTH` in `config.py`. Touching a world border also kills
+  bulkier and easier to clip — tune via `BASE_GIRTH` / `MAX_GIRTH` /
+  `MAX_GIRTH_SCORE` in `config.py`. Touching a world border also kills
 - **Score**: food pickups increment score; resets on respawn, not on death,
   so the death card can show what the life you just lost was worth
+- **Growth**: girth and length are both read off the score on a logarithmic
+  curve (`GROWTH_KNEE`, `MAX_GIRTH_SCORE`, `BODY_LENGTH_AT_MAX_GIRTH`), not
+  accumulated per pellet. A new serpent grows visibly from its first few
+  pellets, and the top of the leaderboard stops running away with it
 - **Respawn**: bots come back on a `RESPAWN_DELAY` timer; a human stays dead
   until they click **RESPAWN**, which the server honours once the same delay
   has passed. A dead serpent ships no body -- its remains are already on the

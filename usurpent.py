@@ -152,9 +152,38 @@ def _wrap_angle(angle):
     return angle
 
 
+def _growth_fraction(score):
+    """How far along the growth curve a life score sits.
+
+    0 at spawn, 1 at MAX_GIRTH_SCORE, and past 1 beyond it. Logarithmic: see
+    GROWTH_KNEE for why linear was the wrong shape at both ends of a curve
+    whose top is five figures.
+    """
+    if score <= 0.0:
+        return 0.0
+    span = math.log1p(config.MAX_GIRTH_SCORE / config.GROWTH_KNEE)
+    if span <= 0.0:
+        return 0.0
+    return math.log1p(score / config.GROWTH_KNEE) / span
+
+
 def _girth_for_score(score):
     """Body radius (world units) for a given life score, capped."""
-    return min(config.MAX_GIRTH, config.BASE_GIRTH + score * config.GIRTH_PER_FOOD)
+    return min(config.MAX_GIRTH,
+               config.BASE_GIRTH
+               + (config.MAX_GIRTH - config.BASE_GIRTH) * _growth_fraction(score))
+
+
+def _length_for_score(score):
+    """Body length (world units) for a given life score.
+
+    Derived from the score rather than accumulated a pellet at a time, the way
+    girth already was. Adding a constant per bite can only ever describe a
+    straight line, so a curve has to be read off the score itself.
+    """
+    return (config.INITIAL_BODY_LENGTH
+            + (config.BODY_LENGTH_AT_MAX_GIRTH - config.INITIAL_BODY_LENGTH)
+            * _growth_fraction(score))
 
 
 def _value_for_radius(radius):
@@ -717,7 +746,7 @@ class World:
                 if dx * dx + dy * dy < limit * limit:
                     del self.foods[fid]
                     player.score += food["value"]
-                    player.length += food["value"] * config.BODY_GROWTH
+                    player.length = _length_for_score(player.score)
                     player.session_food += 1
                     player.girth = _girth_for_score(player.score)
 
