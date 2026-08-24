@@ -455,6 +455,18 @@ class World:
         top of each other. The pellet's own mass is removed from its own
         cell's aggregate, or it would be pulled toward itself.
 
+        That direction is then travelled at a speed that rises as the pellet
+        closes. This is the part that makes it read as a pull: the accumulated
+        vector is normalised to get a heading, so distance cancelled out of
+        the step completely and every pellet in range drifted at one flat
+        speed whether it was touching a blob or sitting at the rim. The ramp
+        is taken from the nearest contributing cell's centre of mass, floored
+        by FOOD_ATTRACT_MIN so far outliers still creep rather than stall, and
+        raised to FOOD_ATTRACT_FALLOFF so the approach accelerates. Taking it
+        from a cell centroid rather than the nearest pellet is deliberate --
+        the mesh is the whole reason this pass is linear, and it already knows
+        where the mass is.
+
         Drift speed still falls off with the pellet's own value, so crumbs
         fall into blobs and a fat blob anchors. Positions are read before any
         are written, so the pass is simultaneous and order-independent.
@@ -467,6 +479,9 @@ class World:
         if not shard:
             return
         speed_base = config.FOOD_ATTRACT_SPEED
+        reach = max(1.0, config.FOOD_ATTRACT_RADIUS)
+        falloff = config.FOOD_ATTRACT_FALLOFF
+        floor = config.FOOD_ATTRACT_MIN
         moves = []
         for fid in shard:
             food = self.foods.get(fid)
@@ -478,6 +493,7 @@ class World:
             cx = int(fx // cell)
             cy = int(fy // cell)
             ax = ay = 0.0
+            near2 = -1.0  # distance^2 to the closest mass pulling on us
             for gx in (cx - 1, cx, cx + 1):
                 for gy in (cy - 1, cy, cy + 1):
                     agg = mesh.get((gx, gy))
@@ -498,13 +514,20 @@ class World:
                     d2 = dx * dx + dy * dy
                     if d2 <= 0.0:
                         continue
+                    if near2 < 0.0 or d2 < near2:
+                        near2 = d2
                     inv = m / math.sqrt(d2)
                     ax += dx * inv
                     ay += dy * inv
             mag = math.hypot(ax, ay)
-            if mag <= 0.0:
+            if mag <= 0.0 or near2 < 0.0:
                 continue
-            step = speed_base / math.sqrt(fv) * step_dt
+            # 1 at point-blank, 0 at the edge of the pull range.
+            near = 1.0 - math.sqrt(near2) / reach
+            if near < 0.0:
+                near = 0.0
+            pull = floor + (1.0 - floor) * (near ** falloff)
+            step = speed_base * pull / math.sqrt(fv) * step_dt
             moves.append((fid, fx + ax / mag * step, fy + ay / mag * step))
         for fid, nx, ny in moves:
             food = self.foods[fid]

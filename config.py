@@ -82,7 +82,12 @@ GIRTH_PER_FOOD = (MAX_GIRTH - BASE_GIRTH) / max(1.0, MAX_GIRTH_SCORE)
 # rate. A tenth of that puts the same serpent at ~800.
 BODY_GROWTH = _env_float("USURPENT_BODY_GROWTH", 0.2)         # world-length units per pellet value
 FOOD_COUNT = _env_int("USURPENT_FOOD_COUNT", 4000)             # initial seed at start
-FOOD_BASE_RADIUS = _env_float("USURPENT_FOOD_BASE_RADIUS", 5.0)
+# A spawned pellet is the smallest thing on the map and the unit the rest of
+# the food scale is read against, so it wants to be visibly a crumb next to a
+# gathered blob (which caps at FOOD_MERGE_MAX_RADIUS). It also sets how
+# densely a fresh carcass can land without its pellets starting out already
+# inside one another -- see FOOD_MERGE_OVERLAP.
+FOOD_BASE_RADIUS = _env_float("USURPENT_FOOD_BASE_RADIUS", 2.0)
 FOOD_RADIUS_PER_VALUE = _env_float("USURPENT_FOOD_RADIUS_PER_VALUE", 10.0)
 FOOD_PICKUP_PAD = _env_float("USURPENT_FOOD_PICKUP_PAD", 10.0) # added to pellet radius for pickup
 
@@ -146,11 +151,23 @@ CARCASS_PELLETS_PER_SEGMENT = _env_int("USURPENT_CARCASS_PELLETS_PER_SEGMENT", 4
 # backstop. Merging conserves value exactly: a blob is worth what its crumbs
 # were worth, so the score economy is unchanged.
 FOOD_ATTRACT_RADIUS = _env_float("USURPENT_FOOD_ATTRACT_RADIUS", 140.0)  # pull range
-# Drift speed for a value-1 crumb, in world units/sec. HEAD_SPEED is 80, so at
-# 0.7 a crumb creeps at under a hundredth of a serpent's pace: gathering a
-# carcass is a minutes-long animation you happen to catch in progress, not
-# something that resolves while you watch.
-FOOD_ATTRACT_SPEED = _env_float("USURPENT_FOOD_ATTRACT_SPEED", 0.7)
+# Drift speed for a value-1 crumb at point-blank range, in world units/sec.
+# HEAD_SPEED is 80, so even at full pull a crumb moves at a fiftieth of a
+# serpent's pace: gathering a carcass is an animation you catch in progress,
+# not something that resolves while you watch.
+FOOD_ATTRACT_SPEED = _env_float("USURPENT_FOOD_ATTRACT_SPEED", 1.6)
+# How sharply the pull strengthens as pellets close. The drift used to be a
+# flat speed in the direction of the surrounding mass -- the distance to that
+# mass cancelled out of the step entirely, so a crumb at the rim of the pull
+# range crept in at exactly the pace of one already touching a blob. It read
+# as a conveyor belt rather than gravity. The step is now scaled by a
+# closeness ramp, raised to this power: 1.0 is a linear ramp, 2.0 accelerates
+# into contact the way a real pull does.
+FOOD_ATTRACT_FALLOFF = _env_float("USURPENT_FOOD_ATTRACT_FALLOFF", 2.0)
+# Floor under that ramp. Without it a pellet at the edge of the mesh's reach
+# would have no pull at all and outliers from a wide carcass scatter would
+# simply sit there forever instead of eventually finding their way in.
+FOOD_ATTRACT_MIN = _env_float("USURPENT_FOOD_ATTRACT_MIN", 0.2)
 # Both gravity passes work on a rota rather than the whole field every tick:
 # each tick only the shard whose pellet id matches gets its neighbourhood
 # scanned. Ids are handed out in sequence, so a carcass spreads itself evenly
@@ -160,14 +177,18 @@ FOOD_ATTRACT_SPEED = _env_float("USURPENT_FOOD_ATTRACT_SPEED", 0.7)
 # on the same tick.
 FOOD_GRAVITY_SHARDS = _env_int("USURPENT_FOOD_GRAVITY_SHARDS", 8)
 FOOD_MERGE_MAX_RADIUS = _env_float("USURPENT_FOOD_MERGE_MAX_RADIUS", 34.0)  # blobs stop growing here
-# How deeply two pellets must overlap before they fuse, as a fraction of
-# (r1 + r2). At 1.0 they merge the instant their circles graze -- which means
-# a fresh carcass, whose crumbs are dropped closer together than their own
-# diameter, collapses on the very first tick and the drift never shows. Lower
-# values make pellets travel visibly toward each other before fusing. At 0.25
-# a fresh carcass lands as a lootable field of crumbs that visibly crawls
-# together over the next ten seconds or so.
-FOOD_MERGE_OVERLAP = _env_float("USURPENT_FOOD_MERGE_OVERLAP", 0.25)
+# How close two pellets must be before they fuse, as a fraction of (r1 + r2).
+# 1.0 fuses the instant their circles graze; lower values require them to
+# interpenetrate first. This was 0.25, which meant two touching crumbs had to
+# close to a quarter of their combined radii -- most of the way to concentric
+# -- before merging, so pellets visibly sat inside one another waiting. 0.8
+# fuses just after the circles meet, which reads as two blobs coalescing.
+# The reason it was ever set so low is that a fresh carcass drops crumbs
+# closer together than their own diameter, so a high value collapsed the
+# whole thing on the first tick and the drift never showed. A smaller
+# FOOD_BASE_RADIUS and the closeness ramp on the pull are what buy that back:
+# the crumbs start apart, so they have somewhere to travel from.
+FOOD_MERGE_OVERLAP = _env_float("USURPENT_FOOD_MERGE_OVERLAP", 0.8)
 
 # Bots: server-side AI snakes that play alongside humans. Each bot runs a
 # "strategy" (see bots.py) so different AIs can compete. BOT_COUNT is the
