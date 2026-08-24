@@ -1106,35 +1106,30 @@ class World:
             pellet[protocol.FIELD_FOOD_OWNER] = f["owner"]
         return pellet
 
-    def _food_list(self, around=None, reach=None):
-        """Pellets for the wire, optionally only those near `around`.
+    def _visible_food(self, around, reach):
+        """Raw food dicts within `reach` of `around`, as a fid->dict map.
 
-        With interest management on, a snapshot carries what a client can see
-        rather than the whole map, which is what lets the field be in the
-        thousands: payload tracks the viewport, not the world.
-
-        When a coarse interest grid is available (built each tick by
-        _index_food), the pellets are pulled from the block of grid cells
-        around the viewer instead of scanning the whole field -- the scan was
-        O(pellets x viewers) per tick. The block is a superset of everything
-        within `reach`; the axis-aligned test below trims it back to exactly
-        `reach`, so the result is byte-for-byte the same set the full scan
-        would have produced. One extra cell of slack absorbs the small gravity
-        drift between when the grid was built and when this query runs.
+        Shared by the full-list and delta encoders so they can never disagree
+        about which pellets a viewer can see. Uses the coarse interest grid
+        built each tick by _index_food; falls back to a full scan before the
+        first tick. The block is a superset of everything within `reach`; the
+        axis-aligned test trims it back to exactly `reach`, so the result is
+        byte-for-byte the same set a full scan would produce. One extra cell of
+        slack absorbs the small gravity drift between grid build and query.
         """
         if around is None:
-            return [self._pellet_dict(fid, f) for fid, f in self.foods.items()]
+            return dict(self.foods)
         px, py = around
         if reach is None:
             reach = config.INTEREST_RADIUS
         grid = self._interest_grid
+        out = {}
         if grid is not None:
             cell = grid.cell
             half = int(math.ceil(reach / cell)) + 1
             cx = int(px // cell)
             cy = int(py // cell)
             buckets = grid.buckets
-            out = []
             for gx in range(cx - half, cx + half + 1):
                 for gy in range(cy - half, cy + half + 1):
                     bucket = buckets.get((gx, gy))
@@ -1149,14 +1144,13 @@ class World:
                         y = f["y"]
                         if y < py - reach or y > py + reach:
                             continue
-                        out.append(self._pellet_dict(fid, f))
+                        out[fid] = f
             return out
         # No grid yet (before the first tick): fall back to the full scan.
         minx = px - reach
         maxx = px + reach
         miny = py - reach
         maxy = py + reach
-        out = []
         for fid, f in self.foods.items():
             x = f["x"]
             if x < minx or x > maxx:
@@ -1164,8 +1158,70 @@ class World:
             y = f["y"]
             if y < miny or y > maxy:
                 continue
-            out.append(self._pellet_dict(fid, f))
+            out[fid] = f
         return out
+
+    def _food_list(self, around=None, reach=None):
+        """Pellets for the wire, optionally only those near `around`.
+
+        With interest management on, a snapshot carries what a client can see
+        rather than the whole map, which is what lets the field be in the
+        thousands: payload tracks the viewport, not the world. The set comes
+        from _visible_food (grid-backed); this just renders it to wire dicts.
+        """
+        return [self._pellet_dict(fid, f)
+                for fid, f in self._visible_food(around, reach).items()]
+
+    def _food_delta(self, around=None, reach=None, seen=None):
+        """Food for one viewer as a delta against what they were last sent.
+
+        `seen` is that viewer's id->last-sent-pellet-dict map, mutated in
+        place; pass None (or a fresh dict) to get every visible pellet as an
+        add, which is what the welcome wants. Each tick a viewer is sent only:
+
+          - fadd: pellets that entered their view (full dicts),
+          - frem: pellets that left it (ids only),
+          - fmov: pellets still in view whose state changed (full dicts).
+
+        Gravity and merging only touch a sharded subset of pellets each tick,
+        so most visible pellets are byte-identical tick to tick and are not
+        resent -- which is the whole point, since food is the dominant term in
+        snapshot size. Applied cumulatively the client map stays exactly the
+        visible set.
+        """
+        visible = self._visible_food(around, reach)
+        added = []
+        moved = []
+        new_seen = {}
+        for fid, f in visible.items():
+            d = self._pellet_dict(fid, f)
+            prev = seen.get(fid) if seen is not None else None
+            if prev is None:
+                added.append(d)
+            elif (prev.get(protocol.FIELD_X) != d.get(protocol.FIELD_X)
+                  or prev.get(protocol.FIELD_Y) != d.get(protocol.FIELD_Y)
+                  or prev.get(protocol.FIELD_FOOD_RADIUS)
+                  != d.get(protocol.FIELD_FOOD_RADIUS)
+                  or prev.get(protocol.FIELD_FOOD_DROPPED)
+                  != d.get(protocol.FIELD_FOOD_DROPPED)
+                  or prev.get(protocol.FIELD_FOOD_OWNER)
+                  != d.get(protocol.FIELD_FOOD_OWNER)):
+                moved.append(d)
+            # Every visible pellet -- whether new, moved or unchanged -- stays in
+            # the viewer's history so next tick can tell which left or moved.
+            new_seen[fid] = d
+        removed = []
+        if seen is not None:
+            for fid in seen:
+                if fid not in new_seen:
+                    removed.append(fid)
+            seen.clear()
+            seen.update(new_seen)
+        return {
+            protocol.FIELD_FOOD_ADD: added,
+            protocol.FIELD_FOOD_REMOVE: removed,
+            protocol.FIELD_FOOD_MOVE: moved,
+        }
 
     def _player_dict(self, player, seen, fresh):
         """One serpent as this viewer needs it: the whole body the first time
@@ -1194,12 +1250,15 @@ class World:
         out[protocol.FIELD_POINTS_DROP] = dropped
         return out
 
-    def _snapshot(self, around=None, reach=None, visible=None, seen=None):
+    def _snapshot(self, around=None, reach=None, visible=None, seen=None,
+                  food_seen=None):
         """One viewer's slice of the world.
 
         `visible` is the set of serpent ids this viewer can see; None means
         all of them. `seen` is that viewer's body history, mutated in place;
         None sends every body in full, which is what the welcome wants.
+        `food_seen` is that viewer's food history (id->last pellet dict),
+        mutated in place; None sends every visible pellet as an add.
         """
         players = self.players.values()
         if visible is not None:
@@ -1215,7 +1274,7 @@ class World:
             protocol.FIELD_TYPE: protocol.TYPE_SNAPSHOT,
             protocol.FIELD_TICK: self.tick_count,
             protocol.FIELD_PLAYERS: wire,
-            protocol.FIELD_FOOD: self._food_list(around, reach),
+            protocol.FIELD_FOOD: self._food_delta(around, reach, food_seen),
         }
 
     def _leaderboard(self, viewer):
@@ -1268,10 +1327,13 @@ class World:
             protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
             # Same interest slice as a snapshot, so a joining client is not
             # handed the whole map once and then quietly cut back to its
-            # neighbourhood on the next tick.
-            protocol.FIELD_FOOD: self._food_list(
+            # neighbourhood on the next tick. The welcome sends every visible
+            # pellet as an add (food_seen starts empty), which is exactly the
+            # first-time path the delta encoder uses.
+            protocol.FIELD_FOOD: self._food_delta(
                 around=(player.x, player.y),
-                reach=player.view_radius + config.INTEREST_MARGIN),
+                reach=player.view_radius + config.INTEREST_MARGIN,
+                seen=player.handler.food_seen if player.handler else None),
         }
 
     def _broadcast_snapshot(self, boxes=None):
@@ -1313,7 +1375,8 @@ class World:
                 if bx1 >= min_x and bx0 <= max_x and by1 >= min_y and by0 <= max_y:
                     visible.add(pid)
             snapshot = self._snapshot(around=(player.x, player.y), reach=reach,
-                                      visible=visible, seen=handler.body_seen)
+                                      visible=visible, seen=handler.body_seen,
+                                      food_seen=handler.food_seen)
             handler.write_message(json.dumps(snapshot))
             if send_board:
                 handler.write_message(json.dumps(self._leaderboard(player)))
@@ -1339,6 +1402,9 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
         # What bodies this connection has already been sent, so snapshots can
         # carry deltas. Keyed by serpent id -> (epoch, appended, dropped).
         self.body_seen = {}
+        # What food pellets this connection has already been sent, so snapshots
+        # can carry food deltas. Keyed by pellet id -> last pellet dict.
+        self.food_seen = {}
         # Bind to the logged-in account when a session cookie is present;
         # otherwise this is an anonymous guest (allowed to play). The cookie
         # is signed, so we trust it directly rather than re-authenticating.

@@ -99,3 +99,11 @@ FIELD_FOOD_DROPPED = "dropped"
 FIELD_FOOD_OWNER = "own"
 FIELD_IS_BOT = "is_bot"
 FIELD_STRATEGY = "strategy"
+# Food is delta-encoded in snapshots the same way bodies are: the first time a
+# viewer sees a pellet it arrives whole, after that only what changed. A pellet
+# that entered the viewer's interest radius, one that left it, and one that
+# moved (gravity and merging only touch a sharded subset each tick, so most
+# pellets are byte-identical tick to tick and need not be resent).
+FIELD_FOOD_ADD = "fadd"        # pellets newly in view: full dicts
+FIELD_FOOD_REMOVE = "frem"     # pellets that left view: ids only
+FIELD_FOOD_MOVE = "fmov"       # pellets still in view but changed: full dicts

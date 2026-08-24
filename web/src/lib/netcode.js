@@ -364,7 +364,7 @@ export class Game {
   constructor() {
     this.selfId = null;
     this.players = {};
-    this.foods = [];
+    this.foods = new Map(); // id -> pellet dict; reconciled from food deltas
     this.mapW = 1000;
     this.mapH = 1000;
     this.sim = { ...SIM };
@@ -417,8 +417,25 @@ export class Game {
     if (msg.food_max_radius !== undefined) this.foodMaxRadius = msg.food_max_radius;
     this.players = {};
     msg.players.forEach((p) => (this.players[p.id] = makeState(p, this.selfId)));
-    this.foods = msg.food || [];
+    this.foods = new Map();
+    this.applyFoodDelta(msg.food);
     this.lastSnapTime = 0;
+  }
+
+  // Reconcile the food map from a snapshot's delta. The server sends only what
+  // changed since our last snapshot: fadd (pellets that entered view, full
+  // dicts), frem (ids that left), fmov (pellets still in view but moved). A
+  // first snapshot arrives as all-fadd, which seeds the map. Applied
+  // cumulatively the map stays exactly the pellets in our interest radius.
+  applyFoodDelta(delta) {
+    if (!delta) return;
+    if (!(this.foods instanceof Map)) this.foods = new Map();
+    const add = delta.fadd;
+    if (add) for (const f of add) this.foods.set(f.id, f);
+    const rem = delta.frem;
+    if (rem) for (const id of rem) this.foods.delete(id);
+    const mov = delta.fmov;
+    if (mov) for (const f of mov) this.foods.set(f.id, f);
   }
 
   onLeaderboard(msg) {
@@ -459,7 +476,7 @@ export class Game {
     Object.keys(this.players).forEach((id) => {
       if (!ids.has(id)) delete this.players[id];
     });
-    this.foods = msg.food || [];
+    this.applyFoodDelta(msg.food);
 
     const self = this.players[this.selfId];
     if (self && this.onScore) this.onScore(self.server.score);

@@ -242,7 +242,7 @@
       humans: game.totalPlayers - game.totalBots,
       bots: game.totalBots,
       visible: Object.keys(game.players).length,
-      food: game.foods.length,
+      food: game.foods.size,
       girth: self ? self.server.girth : 0,
       length: self ? self.server.length : 0,
       boosting: game.selfBoosting,
@@ -376,7 +376,7 @@
           if (n > busiest) busiest = n;
         };
         if (gridMode === 1) {
-          for (const f of game.foods) tally(f.x, f.y);
+          for (const f of game.foods.values()) tally(f.x, f.y);
         } else {
           for (const pl of list) {
             if (!pl.alive || !pl.points) continue;
@@ -449,7 +449,7 @@
     // that speck across the map is worth the trip -- and every pellet used to
     // be the same flat amber. Dropped (carcass) pellets keep their lower
     // opacity, so a fresh kill still reads differently from spawned food.
-    for (const f of game.foods) {
+    for (const f of game.foods.values()) {
       const fr = f.r || 10;
       if (!visible(f.x, f.y, fr)) continue;
       const [fx, fy] = toScreen(f.x, f.y);
