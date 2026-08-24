@@ -52,22 +52,35 @@ BOOST_MULTIPLIER = _env_float("USURPENT_BOOST_MULTIPLIER", 1.8)
 SEGMENT_SPACING_FACTOR = _env_float("USURPENT_SEGMENT_SPACING_FACTOR", 0.333)
 MIN_SEGMENT_SPACING = _env_float("USURPENT_MIN_SEGMENT_SPACING", 1.0)
 # Segment count is length / spacing, so these two knobs are what control how
-# long a serpent looks -- girth only sets how thick it is. Both were pulled
-# back by ~10x because snakes were reaching full length far too quickly.
+# long a serpent looks -- girth only sets how thick it is.
 INITIAL_BODY_LENGTH = _env_int("USURPENT_INITIAL_BODY_LENGTH", 16)  # world units
 
 # Body girth: the snake's thickness in world units. It grows as the snake eats
 # and caps at MAX_GIRTH. Girth drives both the rendered body size and the
 # collision size, so bigger snakes are bulkier and easier to hit.
 BASE_GIRTH = _env_float("USURPENT_BASE_GIRTH", 6.0)
-GIRTH_PER_FOOD = _env_float("USURPENT_GIRTH_PER_FOOD", 0.2)
 MAX_GIRTH = _env_float("USURPENT_MAX_GIRTH", 24.0)
+# The score at which a serpent reaches MAX_GIRTH -- this is the knob, not the
+# per-food increment. As an increment of 0.2 it read as a small number while
+# meaning full thickness at score 90: on a leaderboard running to five
+# figures every serpent was identically fat within seconds of spawning and
+# the entire girth curve was dead weight. Expressed as a score it is a number
+# you can hold against the leaderboard and reason about.
+MAX_GIRTH_SCORE = _env_float("USURPENT_MAX_GIRTH_SCORE", 10000.0)
+GIRTH_PER_FOOD = (MAX_GIRTH - BASE_GIRTH) / max(1.0, MAX_GIRTH_SCORE)
 
 # Food.
 # Each pellet carries a radius and a value; bigger pellets are worth more
 # (value = round(radius / FOOD_RADIUS_PER_VALUE), minimum 1). Eating a pellet
 # adds `value` to score and `value * FOOD_GROWTH` to tail length.
-BODY_GROWTH = _env_int("USURPENT_BODY_GROWTH", 2)             # world-length units per pellet value
+# World-length units of tail per point of pellet value. Segment count is
+# length / spacing, and _handle_collisions tests every head against every
+# point of every other body, so this constant sets the per-tick collision
+# cost as much as it sets how long a snake looks. At 2, bots on a 30k
+# leaderboard carried ~8000 points each and the measured snapshot interval
+# was 101 ms against a 50 ms budget -- the sim was running at half its tick
+# rate. A tenth of that puts the same serpent at ~800.
+BODY_GROWTH = _env_float("USURPENT_BODY_GROWTH", 0.2)         # world-length units per pellet value
 FOOD_COUNT = _env_int("USURPENT_FOOD_COUNT", 4000)             # initial seed at start
 FOOD_BASE_RADIUS = _env_float("USURPENT_FOOD_BASE_RADIUS", 5.0)
 FOOD_RADIUS_PER_VALUE = _env_float("USURPENT_FOOD_RADIUS_PER_VALUE", 10.0)
