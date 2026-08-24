@@ -188,6 +188,18 @@
       h / 2 - (wy - camY) * s,
     ];
 
+    // The camera shows a few hundred world units of a 10000-unit map -- well
+    // under 1% of its area -- but everything used to be drawn regardless, so
+    // over 90% of the arcs fell entirely outside the canvas. Test in world
+    // space (cheaper than projecting first) and skip what cannot be seen.
+    const cullMinX = camX - viewW / 2;
+    const cullMaxX = camX + viewW / 2;
+    const cullMinY = camY - viewH / 2;
+    const cullMaxY = camY + viewH / 2;
+    const visible = (wx, wy, radius) =>
+      wx + radius >= cullMinX && wx - radius <= cullMaxX &&
+      wy + radius >= cullMinY && wy - radius <= cullMaxY;
+
     if (selfEnt) {
       const [hsx, hsy] = toScreen(selfEnt.x, selfEnt.y);
       headScreenX = hsx;
@@ -237,10 +249,15 @@
     const sin = Math.sin(a);
     ctx.globalAlpha = 0.15;
     for (const p of particles) {
+      // Keep orbiting every particle even when it is off screen, or they would
+      // freeze in place and jump when the camera catches up; only the draw is
+      // skipped. p.r is already in screen pixels, so convert it back for the
+      // world-space test.
       const nx = cos * (p.x - p.tx) + sin * (p.y - p.ty) + p.tx;
       const ny = cos * (p.y - p.ty) - sin * (p.x - p.tx) + p.ty;
       p.x = nx;
       p.y = ny;
+      if (!visible(p.x, p.y, p.r / s)) continue;
       const [px, py] = toScreen(p.x, p.y);
       ctx.beginPath();
       ctx.arc(px, py, p.r, 0, Math.PI * 2);
@@ -257,6 +274,8 @@
     // colorFor would have given a human anyway.
     const byId = new Map(list.map((pl) => [pl.id, pl]));
     for (const f of game.foods) {
+      const fr = f.r || 10;
+      if (!visible(f.x, f.y, fr)) continue;
       const [fx, fy] = toScreen(f.x, f.y);
       ctx.globalAlpha = f.dropped ? 0.61 : 1.0;
       const owner = f.own ? byId.get(f.own) : null;
@@ -264,7 +283,7 @@
         : f.own ? colorFor(f.own)
         : '#ffd166';
       ctx.beginPath();
-      ctx.arc(fx, fy, (f.r || 10) * s, 0, Math.PI * 2);
+      ctx.arc(fx, fy, fr * s, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
@@ -283,9 +302,11 @@
       if (pl.points && pl.points.length) {
         // Points carry their own alpha so segments entering at the head and
         // leaving at the tail fade rather than pop (see queuedPoints).
+        const girthWorld = pl.girth || 6;
         for (const pt of pl.points) {
           const a = pt.length > 2 ? pt[2] : 1;
           if (a <= 0.01) continue;
+          if (!visible(pt[0], pt[1], girthWorld)) continue;
           ctx.globalAlpha = bodyAlpha * a;
           const [px, py] = toScreen(pt[0], pt[1]);
           ctx.beginPath();
@@ -295,6 +316,12 @@
         }
       }
       ctx.globalAlpha = bodyAlpha;
+
+      // Most serpents on the map are nowhere near the camera; skip the head
+      // and its label too, not just the body. The name sits above the head, so
+      // allow a little extra height before culling it away.
+      const headVisible = visible(pl.x, pl.y, (pl.girth || 6) + 24 / s);
+      if (!headVisible) continue;
 
       const [hx, hy] = toScreen(pl.x, pl.y);
       ctx.beginPath();

@@ -554,12 +554,34 @@ class World:
         )
 
     def _handle_food(self):
+        """Feed any head sitting on a pellet.
+
+        This used to scan every pellet for every player, so it grew with the
+        whole food list however far away it was. A head can only ever reach a
+        pellet within its own pickup range, so bucket the field and look at the
+        few cells that could contain one -- the same grid the gravity passes
+        use. Compares squared distances to skip a sqrt per pellet.
+        """
+        if not self.foods:
+            return
+        # Cell size has to cover the largest reachable pickup distance, so that
+        # a hit can never sit outside the 3x3 block around the head.
+        reach = config.FOOD_MERGE_MAX_RADIUS + config.FOOD_PICKUP_PAD
+        cell = max(1.0, reach)
+        buckets = self._food_buckets(cell)
         for player in self.players.values():
             if not player.alive:
                 continue
-            for fid, food in list(self.foods.items()):
-                fx, fy = food["x"], food["y"]
-                if math.hypot(player.x - fx, player.y - fy) < (food["r"] + config.FOOD_PICKUP_PAD):
+            px, py = player.x, player.y
+            cx, cy = int(px // cell), int(py // cell)
+            for fid in list(self._food_neighbours(buckets, cx, cy)):
+                food = self.foods.get(fid)
+                if food is None:
+                    continue  # already eaten this tick
+                dx = px - food["x"]
+                dy = py - food["y"]
+                limit = food["r"] + config.FOOD_PICKUP_PAD
+                if dx * dx + dy * dy < limit * limit:
                     del self.foods[fid]
                     player.score += food["value"]
                     player.length += food["value"] * config.BODY_GROWTH
@@ -577,15 +599,18 @@ class World:
                     player.y <= 0.0 or player.y >= config.MAP_HEIGHT):
                 self._kill_player(player)
                 continue
+            hx, hy = player.x, player.y
             for other in self.players.values():
                 if other is player or not other.alive:
                     continue
                 # Die if the head enters (attacker girth + defender girth) of
                 # any body point. Bigger snakes are both bulkier and easier to
-                # clip, so girth matters in both directions.
+                # clip, so girth matters in both directions. Squared distances
+                # keep a sqrt out of the innermost loop in the tick.
+                reach = player.girth + other.girth
+                reach2 = reach * reach
                 hit = any(
-                    math.hypot(player.x - px, player.y - py)
-                    < (player.girth + other.girth)
+                    (hx - px) * (hx - px) + (hy - py) * (hy - py) < reach2
                     for (px, py) in other.points
                 )
                 if hit:
@@ -709,10 +734,17 @@ class World:
         }
 
     def _broadcast_snapshot(self):
-        snapshot = self._snapshot()
-        for player in self.players.values():
-            if player.handler is not None:
-                player.handler.write_message(snapshot)
+        # Serialise once. Handing write_message a dict makes Tornado JSON-encode
+        # it separately for every recipient, so the cost of encoding the whole
+        # world scaled with the number of players watching it -- the largest
+        # single phase of the tick at four connections. Everyone gets the same
+        # bytes, so encode them once and hand the string out.
+        listeners = [p.handler for p in self.players.values() if p.handler is not None]
+        if not listeners:
+            return
+        payload = json.dumps(self._snapshot())
+        for handler in listeners:
+            handler.write_message(payload)
 
 
 class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):

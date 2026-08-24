@@ -101,10 +101,11 @@ CARCASS_PELLETS_PER_SEGMENT = _env_int("USURPENT_CARCASS_PELLETS_PER_SEGMENT", 4
 # backstop. Merging conserves value exactly: a blob is worth what its crumbs
 # were worth, so the score economy is unchanged.
 FOOD_ATTRACT_RADIUS = _env_float("USURPENT_FOOD_ATTRACT_RADIUS", 140.0)  # pull range
-# Drift speed for a value-1 crumb, in world units/sec. HEAD_SPEED is 80, so
-# this is deliberately a slow crawl -- you should be able to watch a carcass
-# gather, and always outrun it.
-FOOD_ATTRACT_SPEED = _env_float("USURPENT_FOOD_ATTRACT_SPEED", 7.0)
+# Drift speed for a value-1 crumb, in world units/sec. HEAD_SPEED is 80, so at
+# 0.7 a crumb creeps at under a hundredth of a serpent's pace: gathering a
+# carcass is a minutes-long animation you happen to catch in progress, not
+# something that resolves while you watch.
+FOOD_ATTRACT_SPEED = _env_float("USURPENT_FOOD_ATTRACT_SPEED", 0.7)
 # Both gravity passes work on a rota rather than the whole field every tick:
 # each tick only the shard whose pellet id matches gets its neighbourhood
 # scanned. Ids are handed out in sequence, so a carcass spreads itself evenly
