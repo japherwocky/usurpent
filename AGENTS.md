@@ -102,9 +102,10 @@ it to Done.
 
 ## Food and pellet gravity
 
-Food is the dominant term in snapshot size, so the food list is kept small by
-design. Three invariants hold it together — breaking any one of them brings
-back the unbounded-growth bug that made the game feel laggy:
+The field is deliberately large — `FOOD_MAX` is 8000 — and what is kept small
+is the slice each client is *sent*. Several invariants hold this up, and each
+one was put there to fix a measured problem. Breaking any of them brings the
+problem back, usually silently:
 
 - **`FOOD_MAX` is global.** Anything that creates pellets goes through
   `World._make_room()` first. It evicts oldest-first and only evicts `dropped`
@@ -114,13 +115,44 @@ back the unbounded-growth bug that made the game feel laggy:
   A blob is worth exactly what its crumbs were worth, so the score economy is
   unaffected by how much has clumped. A merged pellet stays `dropped` if
   either half was, so merging cannot launder crumbs past the cap.
+- **Gravity reads a mass mesh, never individual neighbours.** Neighbour counts
+  grow with density, so a per-neighbour scan is quadratic in field size — it
+  measured 240 ms per tick at 50k pellets. `_attract_food()` instead reads nine
+  per-cell centre-of-mass aggregates whatever the density, subtracting the
+  pellet's own mass from its own cell. Reintroducing a pairwise scan will look
+  fine at a thousand pellets and fall over at ten.
 - **Both gravity passes are sharded** by `FOOD_GRAVITY_SHARDS`: a pellet is
-  processed once every N ticks, keyed on its id. Drift steps are scaled by N,
-  so sharding changes cost and not speed. This also flattens the cost spike
-  when a big carcass lands wanting to fuse all at once.
+  processed once every N ticks. The rota is stored on the pellet (`shard`) at
+  creation rather than derived from its id, because `int(fid)` on every pellet
+  every tick is real money at this field size. Drift steps are scaled by N, so
+  sharding changes cost and not speed.
+- **One walk of the food list per tick.** `_index_food()` builds the gravity
+  mesh, the fine grid and the shard list in a single pass, because at this
+  size walking the list is itself the expensive part. Don't add another walk.
+- **The fine grid cell must cover the longest reach that queries it.**
+  `_fine_cell()` derives it from the merge reach (which carries
+  `FOOD_MERGE_OVERLAP`) and the pickup reach. A 3x3 block only guarantees one
+  cell of coverage in each direction, so an undersized cell means a head can
+  sit on a pellet and not eat it — no error, just a pellet that won't pick up.
+  Retune `FOOD_MERGE_OVERLAP` or `FOOD_PICKUP_PAD` and this follows along.
 
-Measure before tuning — `World.tick()` runs well under 1 ms typically, and the
-whole tick budget is 50 ms at `TICK_HZ=20`.
+Interest management is what lets the field be this big. `_broadcast_snapshot()`
+sends each player only the food near them, so payload tracks the viewport
+rather than the map. Clients report how much world they can show (`view`, on
+the WS handshake and again on resize); the server clamps it between
+`INTEREST_MIN_RADIUS` and `INTEREST_RADIUS` and adds `INTEREST_MARGIN`. This
+costs the encode-once trick — snapshots differ per viewer now — which is a
+good trade, but it does mean **snapshot cost scales with connected players**.
+
+Note the ceiling is the map, not the server. A viewport covers 0.374% of
+10000x10000; food concentrates inside `FOOD_SPAWN_RADIUS` rather than spreading
+over the whole map, which roughly doubles it, so 8000 pellets reads as about
+50 on screen. Raising `FOOD_MAX` past ~10000 runs out of tick budget before it
+makes the screen look much busier — shrinking `MAP_WIDTH`/`MAP_HEIGHT` or
+`FOOD_SPAWN_RADIUS` is the cheaper lever for density.
+
+Measure before tuning. The budget is 50 ms at `TICK_HZ=20`; a populated map
+with four players connected runs around 17 ms median and peaks near 30 ms.
 
 ## Conventions
 

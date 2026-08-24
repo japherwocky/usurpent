@@ -126,11 +126,17 @@ routes - no separate frontend server needed.
 
 - **Steering**: the server caps turn rate, so trails curve smoothly rather
   than snapping to the cursor
-- **Collision**: head-vs-other-body kills; your own tail is ignored. Tune
-  `COLLISION_RADIUS` in `config.py`
+- **Collision**: head-vs-other-body kills; your own tail is ignored. The
+  hit distance is the two serpents' girths added, so bigger snakes are both
+  bulkier and easier to clip — tune via `BASE_GIRTH` / `GIRTH_PER_FOOD` /
+  `MAX_GIRTH` in `config.py`. Touching a world border also kills
 - **Score**: food pickups increment score; resets on death
-- **Simulation**: the server runs a fixed-tick loop and broadcasts full-state
-  snapshots; the client interpolates between them
+- **Pellet gravity**: loose food drifts toward nearby food and merges on
+  contact, so a scattered carcass slowly gathers into a few fat blobs. Merging
+  conserves value exactly, so a blob is worth what its crumbs were
+- **Simulation**: the server runs a fixed-tick loop at 20 Hz and sends each
+  client the slice of the world it can see; the client interpolates between
+  snapshots and predicts its own serpent locally
 
 ## Development
 
@@ -177,8 +183,10 @@ Auth uses Tornado secure cookies plus XSRF protection. Errors are JSON
 This is an active solo side project. Current areas for improvement:
 
 1. **Game modes** - different gameplay variations (not yet built)
-2. **Performance** - snapshot broadcast is full-state; fine for a small
-   number of players, delta-compress later if needed
+2. **Performance** - snapshots are already cut to each client's viewport, so
+   payload tracks the view rather than the map. The remaining wins are delta
+   compression (snapshots are still full-state *within* the viewport) and
+   culling distant players the way food already is
 3. **Mobile support** - touch controls (not yet built)
 4. **Tests** - no automated test suite yet
 
