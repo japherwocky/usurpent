@@ -186,6 +186,74 @@ def _length_for_score(score):
             * _growth_fraction(score))
 
 
+# --- Proximity rules -------------------------------------------------------
+#
+# Every "are these two things close enough" test in the sim is defined here,
+# and nowhere else. They used to be written out at each call site, and two of
+# the three quietly left out one of the two radii involved:
+#
+#   - pickup tested `food_r + FOOD_PICKUP_PAD` and never consulted the
+#     serpent's girth, so at full girth a pellet could sit fourteen units
+#     inside the drawn head and not be eaten;
+#   - merging scaled FOOD_MERGE_OVERLAP by the SUM of the radii, which lands
+#     inside the larger pellet's own radius once one dwarfs the other, so a
+#     crumb could sit visibly within a blob for seconds.
+#
+# Both read as "the collision detection is slightly off" and both were a
+# missing term. Every rule below takes BOTH radii, so it cannot be called
+# without saying how big both things are, and _fine_cell sizes the lookup grid
+# from these same functions rather than restating them -- an undersized cell
+# is the same bug with no error to show for it.
+
+
+def _within(ax, ay, bx, by, limit):
+    """True when two points are closer than `limit`.
+
+    Compares squared distances: these run in the tick's innermost loops and a
+    sqrt per candidate is real money at this field size.
+    """
+    if limit <= 0.0:
+        return False
+    dx = ax - bx
+    dy = ay - by
+    return dx * dx + dy * dy < limit * limit
+
+
+def _collision_reach(girth_a, girth_b):
+    """How close a head gets to another serpent's body before it has died.
+
+    Both girths count, so a bigger serpent is both bulkier and easier to clip.
+    """
+    return girth_a + girth_b
+
+
+def _head_reach(girth):
+    """A head's effective radius for eating.
+
+    FOOD_PICKUP_PAD is a FLOOR on this rather than an addition to it. As an
+    addition it would make a big serpent eat from most of a body-length away;
+    as a floor it keeps a small one exactly as forgiving as it has always been
+    while a large one simply eats what its head is touching.
+    """
+    return max(girth, config.FOOD_PICKUP_PAD)
+
+
+def _pickup_reach(girth, food_radius):
+    """How close a head gets to a pellet before eating it."""
+    return food_radius + _head_reach(girth)
+
+
+def _merge_reach(r1, r2):
+    """How close two pellets get before they fuse.
+
+    FOOD_MERGE_OVERLAP is measured on the sum of the radii, which is right for
+    two pellets of a size and wrong when one dwarfs the other. The larger
+    radius is the floor, so a crumb fuses as its centre crosses the blob's
+    edge rather than waiting to be dragged most of the way to concentric.
+    """
+    return max((r1 + r2) * config.FOOD_MERGE_OVERLAP, r1, r2)
+
+
 def _value_for_radius(radius):
     """Pellet value from its radius: bigger pellets are worth more."""
     return max(1, round(radius / config.FOOD_RADIUS_PER_VALUE))
@@ -451,14 +519,21 @@ class World:
     # bare combined radius made every merge scan four times the candidates it
     # needed to. Deriving it keeps that honest if the overlap is ever retuned.
     def _fine_cell(self):
-        # Both arms of the merge rule, or the grid stops covering the reach
-        # that queries it the moment FOOD_MERGE_OVERLAP is tuned down.
-        merge_reach = max(config.FOOD_MERGE_MAX_RADIUS * 2.0
-                          * config.FOOD_MERGE_OVERLAP,
-                          config.FOOD_MERGE_MAX_RADIUS)
-        pickup_reach = (config.FOOD_MERGE_MAX_RADIUS
-                        + max(config.FOOD_PICKUP_PAD, config.MAX_GIRTH))
-        return max(1.0, merge_reach, pickup_reach)
+        """Cell size for the merge/pickup lookup grid.
+
+        Derived from the proximity rules themselves at their widest -- two
+        pellets both at the merge cap, and a maxed head against a capped
+        pellet -- rather than restating them. A 3x3 block only guarantees one
+        cell of coverage in each direction, so a cell narrower than the
+        longest reach that queries it means a head can sit on a pellet and not
+        eat it, with no error to show for it. Retune any of the constants and
+        the grid follows on its own.
+        """
+        widest = max(_merge_reach(config.FOOD_MERGE_MAX_RADIUS,
+                                  config.FOOD_MERGE_MAX_RADIUS),
+                     _pickup_reach(config.MAX_GIRTH,
+                                   config.FOOD_MERGE_MAX_RADIUS))
+        return max(1.0, widest)
 
     def _index_food(self):
         """Build everything the tick needs from ONE walk of the food list.
@@ -652,18 +727,8 @@ class World:
                 other = self.foods.get(nid)
                 if other is None:
                     continue
-                # The overlap fraction is measured on the SUM of the radii,
-                # which is right for two pellets of a size and wrong when one
-                # dwarfs the other: at r=34 against r=2 it puts the merge at
-                # 28.8, INSIDE the big pellet's own radius, so a crumb whose
-                # centre was well within the blob would not fuse and had to be
-                # dragged the last five units by gravity -- several seconds
-                # sat visibly inside it. Whichever threshold is larger wins,
-                # so a crumb fuses once its centre crosses the blob's edge and
-                # evenly matched pellets keep the behaviour they had.
-                big = food["r"] if food["r"] > other["r"] else other["r"]
-                touch = max((food["r"] + other["r"]) * config.FOOD_MERGE_OVERLAP, big)
-                if math.hypot(other["x"] - food["x"], other["y"] - food["y"]) >= touch:
+                if not _within(food["x"], food["y"], other["x"], other["y"],
+                               _merge_reach(food["r"], other["r"])):
                     continue
                 m1, m2 = food["value"], other["value"]
                 total = m1 + m2
@@ -795,18 +860,8 @@ class World:
                 food = self.foods.get(fid)
                 if food is None:
                     continue  # already eaten this tick
-                dx = px - food["x"]
-                dy = py - food["y"]
-                # Reach past the pellet is the forgiveness pad or the head's
-                # own radius, whichever is greater. FOOD_PICKUP_PAD alone
-                # never consulted the girth, so it silently doubled as "how
-                # big is the head" -- true enough at the base girth of 6 and
-                # wrong by 14 units at full girth, where a pellet could sit
-                # well inside the drawn head and not be eaten. Taking the max
-                # closes that without making small serpents any more
-                # vacuum-like than they already were.
-                limit = food["r"] + max(config.FOOD_PICKUP_PAD, player.girth)
-                if dx * dx + dy * dy < limit * limit:
+                if _within(px, py, food["x"], food["y"],
+                           _pickup_reach(player.girth, food["r"])):
                     del self.foods[fid]
                     player.score += food["value"]
                     player.length = _length_for_score(player.score)
@@ -832,8 +887,16 @@ class World:
                 # any body point. Bigger snakes are both bulkier and easier to
                 # clip, so girth matters in both directions. Squared distances
                 # keep a sqrt out of the innermost loop in the tick.
-                reach = player.girth + other.girth
+                reach = _collision_reach(player.girth, other.girth)
                 reach2 = reach * reach
+                # The squared compare is inlined here rather than going
+                # through _within, and only here: this is the innermost loop
+                # in the tick and the only one that runs per body POINT, so it
+                # is quadratic in players and linear in body length on top.
+                # A call per point measured 12% of the pass at twenty
+                # serpents. What is inlined is the arithmetic; the rule itself
+                # still comes from _collision_reach, which is the part that
+                # had a term missing everywhere else.
                 hit = any(
                     (hx - px) * (hx - px) + (hy - py) * (hy - py) < reach2
                     for (px, py) in other.points
