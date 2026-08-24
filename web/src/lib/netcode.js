@@ -153,18 +153,42 @@ function alignPoints(prev, next) {
 // across the tick and the dropped tail points fade out, so segments arrive and
 // leave instead of popping. This is the enter/update/exit split, done against
 // the canvas rather than a DOM data join.
-function queuedPoints(st, alpha) {
+function queuedPoints(st, alpha, sim, headX, headY) {
   const next = st.server.points;
+  if (!next.length) return [];
+  // Fade on how far the head has pulled past the newest point, not on how far
+  // through the tick we are. Those are only the same thing when a point
+  // arrives every tick, and it doesn't: appends per tick are the head's
+  // distance over the spacing, and the spacing grows with girth. A serpent at
+  // girth 24 lays a point every OTHER tick, so a snapshot alpha left the body
+  // frozen on half of them while the head carried on lerping away from it --
+  // measured at 30% of snapshots by girth 14-20, and the head pulling 6 units
+  // clear before a segment stepped into place. This is the same fractional
+  // tail localPoints uses for our own serpent; it advances every frame because
+  // the head does.
+  const girth = st.server.girth || sim.baseGirth;
+  const spacing = Math.max(sim.minSegmentSpacing, girth * sim.segmentSpacingFactor);
+  const newest = next[next.length - 1];
+  const frac = spacing > 0
+    ? Math.min(1, Math.hypot(headX - newest[0], headY - newest[1]) / spacing)
+    : 1;
+
   const shift = st.shift;
-  if (!shift || !st.prev) return next.map((p) => [p[0], p[1], 1]);
   const out = [];
-  const prev = st.prev.points;
-  for (let i = 0; i < shift.dropped; i++) {
-    out.push([prev[i][0], prev[i][1], 1 - alpha]);
+  if (shift && st.prev) {
+    // Points that left this tick, fading out as the head earns their
+    // replacement -- the same clock, so the two ends hand over together.
+    const prev = st.prev.points;
+    for (let i = 0; i < shift.dropped; i++) {
+      out.push([prev[i][0], prev[i][1], 1 - frac]);
+    }
   }
-  const entering = next.length - shift.added;
   for (let i = 0; i < next.length; i++) {
-    out.push([next[i][0], next[i][1], i >= entering ? alpha : 1]);
+    // Only the newest point is still being laid down. Anything behind it is
+    // finished and sits at full weight, which is the queue invariant: interior
+    // points do not move and do not need animating.
+    const a = i === next.length - 1 && next.length > 1 ? frac : 1;
+    out.push([next[i][0], next[i][1], a]);
   }
   return out;
 }
@@ -319,12 +343,14 @@ function renderState(st, alpha, sim) {
     };
   }
   if (!st.prev) return st.server;
+  const x = lerp(st.prev.x, st.server.x, alpha);
+  const y = lerp(st.prev.y, st.server.y, alpha);
   return {
     id: st.server.id,
-    x: lerp(st.prev.x, st.server.x, alpha),
-    y: lerp(st.prev.y, st.server.y, alpha),
+    x,
+    y,
     heading: lerpAngle(st.prev.heading, st.server.heading, alpha),
-    points: queuedPoints(st, alpha),
+    points: queuedPoints(st, alpha, sim, x, y),
     alive: st.server.alive,
     score: st.server.score,
     girth: st.server.girth,
