@@ -456,7 +456,8 @@ class World:
         merge_reach = max(config.FOOD_MERGE_MAX_RADIUS * 2.0
                           * config.FOOD_MERGE_OVERLAP,
                           config.FOOD_MERGE_MAX_RADIUS)
-        pickup_reach = config.FOOD_MERGE_MAX_RADIUS + config.FOOD_PICKUP_PAD
+        pickup_reach = (config.FOOD_MERGE_MAX_RADIUS
+                        + max(config.FOOD_PICKUP_PAD, config.MAX_GIRTH))
         return max(1.0, merge_reach, pickup_reach)
 
     def _index_food(self):
@@ -796,7 +797,15 @@ class World:
                     continue  # already eaten this tick
                 dx = px - food["x"]
                 dy = py - food["y"]
-                limit = food["r"] + config.FOOD_PICKUP_PAD
+                # Reach past the pellet is the forgiveness pad or the head's
+                # own radius, whichever is greater. FOOD_PICKUP_PAD alone
+                # never consulted the girth, so it silently doubled as "how
+                # big is the head" -- true enough at the base girth of 6 and
+                # wrong by 14 units at full girth, where a pellet could sit
+                # well inside the drawn head and not be eaten. Taking the max
+                # closes that without making small serpents any more
+                # vacuum-like than they already were.
+                limit = food["r"] + max(config.FOOD_PICKUP_PAD, player.girth)
                 if dx * dx + dy * dy < limit * limit:
                     del self.foods[fid]
                     player.score += food["value"]
