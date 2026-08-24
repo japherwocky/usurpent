@@ -1084,6 +1084,14 @@ class SessionHandler(AuthHandler):
     """Report the current session: a registered account or a guest. GET only."""
 
     def get(self):
+        # Issue the _xsrf cookie here as well as from the app shell. The SPA
+        # calls this once on load, before it can render a form to submit, so
+        # this is the one request guaranteed to precede every API POST no
+        # matter who served the HTML -- and under `npm run dev` nobody here
+        # did: Vite serves the shell and proxies only /api and /ws, so
+        # SpaStaticFileHandler never runs, the cookie is never set, and every
+        # POST is rejected. Reading the property is what sets it.
+        self.xsrf_token
         account = self.current_account
         if account is None:
             self.write({"guest": True})

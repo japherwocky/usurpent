@@ -66,8 +66,16 @@ form hints.
 ## HTTP API (auth)
 
 Auth uses Tornado secure cookies (`user` = signed account id) plus XSRF
-protection (`xsrf_cookies=True`). The SPA must read the `_xsrf` cookie set on
-any GET and echo it in the `X-XSRFToken` header on every API POST.
+protection (`xsrf_cookies=True`). The SPA must read the `_xsrf` cookie and
+echo it in the `X-XSRFToken` header on every API POST.
+
+Two handlers issue that cookie, and it needs to stay that way:
+`SpaStaticFileHandler` when Tornado serves the app shell, and `SessionHandler`
+(`GET /api/me`), which the SPA calls once on load. The second is not
+redundant -- under `npm run dev` Vite serves the shell and proxies only `/api`
+and `/ws`, so `SpaStaticFileHandler` never runs. Without it the cookie is
+never set in development and every API POST comes back 403, while production
+works fine. Reading `self.xsrf_token` is what sets it.
 
 - `POST /api/register` — body `{username, password, email?}` → `{ok, username}`.
   Username 3-32 chars `[A-Za-z0-9_-]`; password >= 8 chars; email optional.
