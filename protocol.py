@@ -9,6 +9,11 @@ hand-write a message type string elsewhere.
 TYPE_INPUT = "input"
 TYPE_WELCOME = "welcome"
 TYPE_SNAPSHOT = "snapshot"
+# Standings, sent on its own slow cadence rather than riding the snapshot.
+# Snapshots only carry serpents a client can see, so the leaderboard can no
+# longer be derived from one -- and it never wanted to be, since it is read at
+# a glance and was being rebuilt twenty times a second.
+TYPE_LEADERBOARD = "leaderboard"
 
 # Common field names.
 FIELD_TYPE = "type"
@@ -55,6 +60,14 @@ FIELD_RESPAWN_DELAY = "respawn_delay"
 # in a guess that silently drifts when the food constants are retuned.
 FIELD_FOOD_MIN_RADIUS = "food_min_radius"
 FIELD_FOOD_MAX_RADIUS = "food_max_radius"
+
+# Leaderboard message fields.
+FIELD_ENTRIES = "entries"      # top N, each {id, username, score, is_bot, strategy}
+FIELD_RANK = "rank"            # 1-based standing, so a viewer outside the top
+                               # N still knows where they sit
+FIELD_TOTAL_PLAYERS = "total"  # counts cover the whole map, not the slice a
+FIELD_TOTAL_BOTS = "bots"      # client can see, or the stats panel would
+                               # report the world shrinking as you walk away
 
 # Per-player fields inside a snapshot's player list.
 FIELD_ID = "id"

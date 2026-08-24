@@ -204,6 +204,13 @@ FOOD_MERGE_MAX_RADIUS = _env_float("USURPENT_FOOD_MERGE_MAX_RADIUS", 34.0)  # bl
 # the crumbs start apart, so they have somewhere to travel from.
 FOOD_MERGE_OVERLAP = _env_float("USURPENT_FOOD_MERGE_OVERLAP", 0.8)
 
+# Leaderboard: sent as its own message, because snapshots now carry only the
+# serpents a client can see and standings are global. Slow on purpose -- it is
+# glanceable text, not gameplay, and at TICK_HZ it was being rebuilt twenty
+# times a second to be read maybe once.
+LEADERBOARD_SIZE = _env_int("USURPENT_LEADERBOARD_SIZE", 10)
+LEADERBOARD_HZ = _env_float("USURPENT_LEADERBOARD_HZ", 2.0)
+
 # Bots: server-side AI snakes that play alongside humans. Each bot runs a
 # "strategy" (see bots.py) so different AIs can compete. BOT_COUNT is the
 # number of bots at start; they respawn automatically to keep the count

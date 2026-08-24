@@ -30,7 +30,7 @@
   // developer read-out, so it lives in a corner instead of over the game.
   let showDebug = false;
   let debug = { fps: 0, tickHz: 0, snapMs: 0, players: 0, humans: 0, bots: 0,
-                food: 0, girth: 0, length: 0, boosting: false };
+                visible: 0, food: 0, girth: 0, length: 0, boosting: false };
   // Controls reminder, faded out once the player has had time to read it.
   let showHint = true;
   let hintTimer = 0;
@@ -125,6 +125,9 @@
         selfScore = 0;
       } else if (msg.type === 'snapshot') {
         game.onSnapshot(msg, performance.now());
+      } else if (msg.type === 'leaderboard') {
+        game.onLeaderboard(msg);
+        updateBoard();
       }
     };
   }
@@ -177,36 +180,47 @@
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { keyBoost = false; updateBoost(); }
   }
 
+  // Built from the leaderboard message rather than from the snapshot: a
+  // snapshot now carries only the serpents in view, so deriving standings from
+  // one would rank whoever happens to be nearby. Rebuilt when that message
+  // arrives instead of on a timer of our own.
   function updateBoard() {
-    const players = Object.values(game.players).map((s) => s.server);
-    const ranked = players
-      .slice()
-      .sort((a, b) => b.score - a.score)
-      .map((p, i) => ({
-        rank: i + 1,
-        id: p.id,
-        name: p.username || (p.is_bot ? 'Bot' : '???'),
-        score: p.score,
-        color: serpentColor(p),
-        isSelf: p.id === game.selfId,
-      }));
+    const ranked = game.leaderboard.map((p, i) => ({
+      rank: i + 1,
+      id: p.id,
+      name: p.username || (p.is_bot ? 'Bot' : '???'),
+      score: p.score,
+      color: serpentColor(p),
+      isSelf: p.id === game.selfId,
+    }));
     board = ranked.slice(0, BOARD_ROWS);
     // Pin the player's own row underneath when they haven't cracked the top.
-    const mine = ranked.find((r) => r.isSelf);
-    selfRow = mine && mine.rank > BOARD_ROWS ? mine : null;
+    const shown = ranked.slice(0, BOARD_ROWS).some((r) => r.isSelf);
+    const self = game.players[game.selfId];
+    selfRow = !shown && game.selfRank && self
+      ? {
+          rank: game.selfRank,
+          id: game.selfId,
+          name: self.server.username || '???',
+          score: self.server.score,
+          color: serpentColor(self.server),
+          isSelf: true,
+        }
+      : null;
   }
 
   function updateDebug() {
-    const players = Object.values(game.players).map((s) => s.server);
-    const bots = players.filter((p) => p.is_bot).length;
     const self = game.players[game.selfId];
     debug = {
       fps: Math.round(fps),
       tickHz: game.sim.tickHz,
       snapMs: Math.round(game.snapInterval),
-      players: players.length,
-      humans: players.length - bots,
-      bots,
+      // Totals are map-wide (from the leaderboard message); `visible` is what
+      // interest culling actually put on the wire for us this tick.
+      players: game.totalPlayers,
+      humans: game.totalPlayers - game.totalBots,
+      bots: game.totalBots,
+      visible: Object.keys(game.players).length,
       food: game.foods.length,
       girth: self ? self.server.girth : 0,
       length: self ? self.server.length : 0,
@@ -427,9 +441,9 @@
     game.step(dt);
     draw();
     updateLifeState(now);
-    if (now - lastBoardAt >= 1000 / BOARD_HZ) {
-      updateBoard();
-      if (showDebug) updateDebug();
+    // The board rebuilds when its message lands, not on a clock of ours.
+    if (showDebug && now - lastBoardAt >= 1000 / BOARD_HZ) {
+      updateDebug();
       lastBoardAt = now;
     }
     raf = requestAnimationFrame(loop);
@@ -519,6 +533,7 @@
         <dt>tick</dt><dd>{debug.tickHz} Hz</dd>
         <dt>snapshot</dt><dd>{debug.snapMs} ms</dd>
         <dt>players</dt><dd>{debug.humans}H / {debug.bots}B</dd>
+        <dt>in view</dt><dd>{debug.visible}</dd>
         <dt>food</dt><dd>{debug.food}</dd>
         <dt>girth</dt><dd>{debug.girth}</dd>
         <dt>length</dt><dd>{debug.length}{debug.boosting ? ' · boost' : ''}</dd>

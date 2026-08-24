@@ -476,6 +476,33 @@ class World:
                 shard.append(fid)
         return mesh, attract_cell, fine, fine_cell, shard
 
+    def _index_players(self):
+        """Bounding box per serpent, for interest culling.
+
+        Food has always been sent by proximity; serpents were not, so every
+        client received every body in full however far away it was -- measured
+        at 876 KB/s on a 32k leaderboard, almost all of it describing serpents
+        nobody could see. A body is a path rather than a point, so proximity
+        means box overlap, and the box costs one walk of the points per tick.
+        That walk pays for itself the moment it lets us skip even one to_dict.
+        """
+        boxes = {}
+        for pid, player in self.players.items():
+            min_x = max_x = player.x
+            min_y = max_y = player.y
+            for px, py in player.points:
+                if px < min_x:
+                    min_x = px
+                elif px > max_x:
+                    max_x = px
+                if py < min_y:
+                    min_y = py
+                elif py > max_y:
+                    max_y = py
+            girth = player.girth
+            boxes[pid] = (min_x - girth, min_y - girth, max_x + girth, max_y + girth)
+        return boxes
+
     def _food_neighbours(self, buckets, cx, cy):
         """Pellet ids in the 3x3 block of cells around (cx, cy)."""
         for gx in (cx - 1, cx, cx + 1):
@@ -911,12 +938,44 @@ class World:
             out.append(self._pellet_dict(fid, f))
         return out
 
-    def _snapshot(self, around=None, reach=None):
+    def _snapshot(self, around=None, reach=None, visible=None):
+        """One viewer's slice of the world.
+
+        `visible` is the set of serpent ids this viewer can see; None means
+        all of them (the welcome, which has no viewport to reason about yet).
+        """
+        players = self.players.values()
+        if visible is not None:
+            players = [p for p in players if p.id in visible]
         return {
             protocol.FIELD_TYPE: protocol.TYPE_SNAPSHOT,
             protocol.FIELD_TICK: self.tick_count,
-            protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
+            protocol.FIELD_PLAYERS: [p.to_dict() for p in players],
             protocol.FIELD_FOOD: self._food_list(around, reach),
+        }
+
+    def _leaderboard(self, viewer):
+        """Standings for one viewer: the top N, plus their own rank."""
+        ranked = sorted(self.players.values(), key=lambda p: p.score, reverse=True)
+        entries = [{
+            protocol.FIELD_ID: p.id,
+            protocol.FIELD_USERNAME: p.username,
+            protocol.FIELD_SCORE: p.score,
+            protocol.FIELD_IS_BOT: p.is_bot,
+            protocol.FIELD_STRATEGY: p.strategy.name if p.strategy else None,
+        } for p in ranked[:config.LEADERBOARD_SIZE]]
+        rank = 0
+        for i, p in enumerate(ranked):
+            if p.id == viewer.id:
+                rank = i + 1
+                break
+        bots = sum(1 for p in ranked if p.is_bot)
+        return {
+            protocol.FIELD_TYPE: protocol.TYPE_LEADERBOARD,
+            protocol.FIELD_ENTRIES: entries,
+            protocol.FIELD_RANK: rank,
+            protocol.FIELD_TOTAL_PLAYERS: len(ranked),
+            protocol.FIELD_TOTAL_BOTS: bots,
         }
 
     def _welcome(self, self_id, player):
@@ -963,13 +1022,35 @@ class World:
         Still handing write_message a pre-encoded string rather than a dict:
         Tornado would otherwise encode it again on the way out.
         """
+        boxes = self._index_players()
+        send_board = self._leaderboard_due()
         for player in self.players.values():
             handler = player.handler
             if handler is None:
                 continue
             reach = player.view_radius + config.INTEREST_MARGIN
-            snapshot = self._snapshot(around=(player.x, player.y), reach=reach)
+            # A serpent is worth sending if its body box overlaps the box this
+            # viewer can see. Always include the viewer's own, which is the one
+            # serpent they need whether or not the maths agrees -- a dead one
+            # ships no body at all, so its box collapses to its head.
+            min_x = player.x - reach
+            max_x = player.x + reach
+            min_y = player.y - reach
+            max_y = player.y + reach
+            visible = {player.id}
+            for pid, (bx0, by0, bx1, by1) in boxes.items():
+                if bx1 >= min_x and bx0 <= max_x and by1 >= min_y and by0 <= max_y:
+                    visible.add(pid)
+            snapshot = self._snapshot(around=(player.x, player.y), reach=reach,
+                                      visible=visible)
             handler.write_message(json.dumps(snapshot))
+            if send_board:
+                handler.write_message(json.dumps(self._leaderboard(player)))
+
+    def _leaderboard_due(self):
+        """True on the ticks that carry standings, at LEADERBOARD_HZ."""
+        every = max(1, round(config.TICK_HZ / max(0.1, config.LEADERBOARD_HZ)))
+        return self.tick_count % every == 0
 
 
 class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):

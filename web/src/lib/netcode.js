@@ -381,6 +381,13 @@ export class Game {
     this.foodMinRadius = 2;
     this.foodMaxRadius = 34;
     this.onScore = null; // (score:number) => void, called when self score changes
+    // Standings, from their own message. Snapshots only carry serpents we can
+    // see, so this cannot be read off this.players any more -- and the totals
+    // below describe the whole map, not our slice of it.
+    this.leaderboard = [];
+    this.selfRank = 0;
+    this.totalPlayers = 0;
+    this.totalBots = 0;
   }
 
   onWelcome(msg) {
@@ -407,6 +414,13 @@ export class Game {
     msg.players.forEach((p) => (this.players[p.id] = makeState(p, this.selfId)));
     this.foods = msg.food || [];
     this.lastSnapTime = 0;
+  }
+
+  onLeaderboard(msg) {
+    this.leaderboard = msg.entries || [];
+    this.selfRank = msg.rank || 0;
+    this.totalPlayers = msg.total || 0;
+    this.totalBots = msg.bots || 0;
   }
 
   onSnapshot(msg, now) {
