@@ -60,7 +60,7 @@ INITIAL_BODY_LENGTH = _env_int("USURPENT_INITIAL_BODY_LENGTH", 16)  # world unit
 # and caps at MAX_GIRTH. Girth drives both the rendered body size and the
 # collision size, so bigger snakes are bulkier and easier to hit.
 BASE_GIRTH = _env_float("USURPENT_BASE_GIRTH", 6.0)
-GIRTH_PER_FOOD = _env_float("USURPENT_GIRTH_PER_FOOD", 0.4)
+GIRTH_PER_FOOD = _env_float("USURPENT_GIRTH_PER_FOOD", 0.2)
 MAX_GIRTH = _env_float("USURPENT_MAX_GIRTH", 24.0)
 
 # Food.
@@ -87,7 +87,11 @@ CARCASS_MAX_PELLETS = _env_int("USURPENT_CARCASS_MAX_PELLETS", 400)    # sample 
 # Pellets are thrown clear of the spine in one of the shapes in carcass.py,
 # picked at random per death. Spread scales with girth, so a big serpent
 # leaves a correspondingly big mess.
-CARCASS_SPREAD_FACTOR = _env_float("USURPENT_CARCASS_SPREAD_FACTOR", 3.8)
+CARCASS_SPREAD_FACTOR = _env_float("USURPENT_CARCASS_SPREAD_FACTOR", 6.0)
+# Serpents are only a handful of segments long now, so one pellet per segment
+# left too little for a scatter pattern to read as a pattern. Subdivide the
+# body path this many times before scattering to get the shape back.
+CARCASS_PELLETS_PER_SEGMENT = _env_int("USURPENT_CARCASS_PELLETS_PER_SEGMENT", 4)
 
 # Pellet gravity: loose pellets drift toward nearby pellets and merge on
 # contact, so a scattered carcass slowly gathers itself into a few fat blobs

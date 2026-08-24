@@ -276,19 +276,25 @@
       const col = serpentColor(pl);
       const girthPx = (pl.girth || 6) * s;
 
-      ctx.globalAlpha = pl.alive ? 1 : 0.3;
+      const bodyAlpha = pl.alive ? 1 : 0.3;
       ctx.fillStyle = col;
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
       ctx.lineWidth = 1;
       if (pl.points && pl.points.length) {
+        // Points carry their own alpha so segments entering at the head and
+        // leaving at the tail fade rather than pop (see queuedPoints).
         for (const pt of pl.points) {
+          const a = pt.length > 2 ? pt[2] : 1;
+          if (a <= 0.01) continue;
+          ctx.globalAlpha = bodyAlpha * a;
           const [px, py] = toScreen(pt[0], pt[1]);
           ctx.beginPath();
-          ctx.arc(px, py, girthPx, 0, Math.PI * 2);
+          ctx.arc(px, py, girthPx * (0.55 + 0.45 * a), 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
         }
       }
+      ctx.globalAlpha = bodyAlpha;
 
       const [hx, hy] = toScreen(pl.x, pl.y);
       ctx.beginPath();

@@ -23,6 +23,26 @@ import math
 GOLDEN_ANGLE = math.pi * (3.0 - math.sqrt(5.0))  # ~137.5 degrees
 
 
+def subdivide(points, factor):
+    """Insert `factor - 1` evenly spaced points between each pair of body points.
+
+    Serpents are only a handful of segments long, so scattering one pellet per
+    segment leaves too few to read as a shape. Densifying the spine first gives
+    the patterns something to work with without changing where the body was.
+    """
+    if factor <= 1 or len(points) < 2:
+        return list(points)
+    out = []
+    for i in range(len(points) - 1):
+        ax, ay = points[i]
+        bx, by = points[i + 1]
+        for step in range(factor):
+            t = step / factor
+            out.append((ax + (bx - ax) * t, ay + (by - ay) * t))
+    out.append(points[-1])
+    return out
+
+
 def _frames(points):
     """Unit tangent and normal at each body point, as (tx, ty, nx, ny).
 

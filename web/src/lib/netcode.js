@@ -55,9 +55,78 @@ function lerpAngle(a, b, t) {
   return a + wrapAngle(b - a) * t;
 }
 
-function interpPoints(a, b, alpha) {
-  if (!a || a.length !== b.length) return b;
-  return a.map((pt, i) => [lerp(pt[0], b[i][0], alpha), lerp(pt[1], b[i][1], alpha)]);
+// A body is a QUEUE, not a set of moving parts: the server appends a point at
+// the head once it has travelled one spacing, and drops one off the tail. The
+// points in between never move at all.
+//
+// So interpolating them index-by-index is wrong -- b[i] is the same world
+// position as a[i + dropped], and lerping a[i] toward b[i] drags every segment
+// one spacing forward each tick, cutting corners on bends. That was the
+// shimmer. Aligning the two snapshots on their shared run instead lets us draw
+// the middle exactly where the server put it and animate only the two ends.
+//
+// Returns {dropped, added}, or null when the two snapshots share no run at all
+// (a respawn or teleport), in which case there is nothing to animate between.
+function alignPoints(prev, next) {
+  if (!prev || !prev.length || !next || !next.length) return null;
+  const head = next[0];
+  // Points only leave from the front, a couple per tick at most, so a short
+  // scan finds the overlap. Failing to find it means the body was replaced.
+  const limit = Math.min(prev.length, 16);
+  for (let k = 0; k < limit; k++) {
+    if (prev[k][0] === head[0] && prev[k][1] === head[1]) {
+      const shared = prev.length - k;
+      if (shared <= 0 || shared > next.length) return null;
+      return { dropped: k, added: next.length - shared };
+    }
+  }
+  return null;
+}
+
+// Body points as [x, y, alpha] triples. Shared points sit at full opacity
+// exactly where the server put them; the freshly appended head points fade in
+// across the tick and the dropped tail points fade out, so segments arrive and
+// leave instead of popping. This is the enter/update/exit split, done against
+// the canvas rather than a DOM data join.
+function queuedPoints(st, alpha) {
+  const next = st.server.points;
+  const shift = st.shift;
+  if (!shift || !st.prev) return next.map((p) => [p[0], p[1], 1]);
+  const out = [];
+  const prev = st.prev.points;
+  for (let i = 0; i < shift.dropped; i++) {
+    out.push([prev[i][0], prev[i][1], 1 - alpha]);
+  }
+  const entering = next.length - shift.added;
+  for (let i = 0; i < next.length; i++) {
+    out.push([next[i][0], next[i][1], i >= entering ? alpha : 1]);
+  }
+  return out;
+}
+
+// The self body is predicted locally at frame rate rather than interpolated
+// between snapshots, so there is no prev/next pair to diff. Fade its ends on
+// how far the head has pulled past the newest point instead: at a full spacing
+// a new point is appended and the oldest dropped, and both alphas hand over at
+// exactly the same moment, so the cycle is seamless.
+function localPoints(local, sim) {
+  const pts = local.points;
+  if (!pts.length) return [];
+  const girth = local.girth || sim.baseGirth;
+  const spacing = Math.max(sim.minSegmentSpacing, girth * sim.segmentSpacingFactor);
+  const newest = pts[pts.length - 1];
+  const frac = spacing > 0
+    ? Math.min(1, Math.hypot(local.x - newest[0], local.y - newest[1]) / spacing)
+    : 1;
+  const maxPoints = Math.max(1, Math.round((local.length || 0) / spacing) + 1);
+  // Only fade the tail once the queue is full; while the serpent is still
+  // growing nothing is being dropped, so the tail must stay solid.
+  const atCapacity = pts.length >= maxPoints;
+  return pts.map((p, i) => {
+    if (i === pts.length - 1 && pts.length > 1) return [p[0], p[1], frac];
+    if (i === 0 && atCapacity && pts.length > 1) return [p[0], p[1], 1 - frac];
+    return [p[0], p[1], 1];
+  });
 }
 
 function cloneLocal(p) {
@@ -128,14 +197,14 @@ function stepLocal(local, dt, target, mapW, mapH, sim, boost) {
   }
 }
 
-function renderState(st, alpha) {
+function renderState(st, alpha, sim) {
   if (st.isSelf && st.local && st.server.alive) {
     return {
       id: st.server.id,
       x: st.local.x,
       y: st.local.y,
       heading: st.local.heading,
-      points: st.local.points,
+      points: localPoints(st.local, sim),
       alive: st.server.alive,
       score: st.server.score,
       girth: st.server.girth,
@@ -150,7 +219,7 @@ function renderState(st, alpha) {
     x: lerp(st.prev.x, st.server.x, alpha),
     y: lerp(st.prev.y, st.server.y, alpha),
     heading: lerpAngle(st.prev.heading, st.server.heading, alpha),
-    points: interpPoints(st.prev.points, st.server.points, alpha),
+    points: queuedPoints(st, alpha),
     alive: st.server.alive,
     score: st.server.score,
     girth: st.server.girth,
@@ -211,6 +280,9 @@ export class Game {
       const st = this.players[p.id] || makeState(p, this.selfId);
       st.prev = st.server; // old authoritative state = interp start
       st.server = p; // new authoritative state = interp end
+      // How the point queue shifted between the two, worked out once here
+      // rather than on every frame of the tick.
+      st.shift = st.prev ? alignPoints(st.prev.points, p.points) : null;
       if (st.isSelf) reconcileLocal(st);
       this.players[p.id] = st;
     });
@@ -237,6 +309,6 @@ export class Game {
   }
 
   renderList(alpha) {
-    return Object.values(this.players).map((s) => renderState(s, alpha));
+    return Object.values(this.players).map((s) => renderState(s, alpha, this.sim));
   }
 }

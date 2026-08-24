@@ -612,9 +612,10 @@ class World:
         """
         drop_r = player.girth * config.DROP_RADIUS_FACTOR
         value = _value_for_radius(drop_r)
-        pts = player.points
-        # One pellet per segment; if the carcass is enormous, sample evenly so
-        # we don't flood the world with food.
+        # Densify the spine first: serpents are only a few segments long, so
+        # one pellet per segment leaves a scatter pattern nothing to draw with.
+        pts = carcass.subdivide(player.points, config.CARCASS_PELLETS_PER_SEGMENT)
+        # If the carcass is enormous, sample evenly so we don't flood the world.
         if len(pts) > config.CARCASS_MAX_PELLETS:
             step = len(pts) / config.CARCASS_MAX_PELLETS
             indices = list(range(0, len(pts), max(1, int(step))))
