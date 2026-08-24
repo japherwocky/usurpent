@@ -24,6 +24,11 @@ FIELD_BOOST = "boost"    # bool: speed boost requested (held control)
 # query arg and again with input, so a resize takes effect. The server clamps
 # it -- a client asking for the whole map would just be told no.
 FIELD_VIEW = "view"
+# bool: the player clicked RESPAWN on the death card. Humans stay dead until
+# they ask, so the card can hold the score they just earned; bots keep the
+# timer. RESPAWN_DELAY still applies as a floor, so the click cannot skip the
+# beat between dying and coming back.
+FIELD_RESPAWN = "respawn"
 FIELD_X = "x"
 FIELD_Y = "y"
 FIELD_MAP_WIDTH = "map_width"
@@ -40,6 +45,10 @@ FIELD_FOOD_SPAWN_RADIUS = "food_spawn_radius"
 FIELD_BASE_GIRTH = "base_girth"
 FIELD_MAX_GIRTH = "max_girth"
 FIELD_TURN_GIRTH_FALLOFF = "turn_girth_falloff"
+# Seconds a dead player must wait before a respawn request is honoured. Sent
+# in the welcome so the client can time the death card's button instead of
+# hardcoding a number the server owns.
+FIELD_RESPAWN_DELAY = "respawn_delay"
 
 # Per-player fields inside a snapshot's player list.
 FIELD_ID = "id"

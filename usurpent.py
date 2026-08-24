@@ -184,6 +184,9 @@ class Player:
         # full radius so a client that never reports one still sees everything
         # it could need; clamped down to what it asks for once it does.
         self.view_radius = config.INTEREST_RADIUS
+        # When this life ended, as a monotonic timestamp. Only meaningful
+        # while dead; RESPAWN_DELAY is measured from it.
+        self.died_at = 0.0
         self.respawn(x, y)
 
     def set_view_radius(self, raw):
@@ -279,7 +282,16 @@ class Player:
             protocol.FIELD_X: round(self.x, 2),
             protocol.FIELD_Y: round(self.y, 2),
             protocol.FIELD_HEADING: round(self.heading, 4),
-            protocol.FIELD_POINTS: [[round(px, 2), round(py, 2)] for px, py in self.points],
+            # A dead serpent ships no body. Its remains are already on the
+            # map as carcass pellets, and a corpse cannot kill anyone (see
+            # _handle_collisions), so drawing one is a lie about the hazard.
+            # It also used to be bounded by the 1.5s respawn timer; now that a
+            # human stays dead until they click, a ghost body would sit there
+            # for as long as they left the tab open.
+            protocol.FIELD_POINTS: (
+                [[round(px, 2), round(py, 2)] for px, py in self.points]
+                if self.alive else []
+            ),
             protocol.FIELD_ALIVE: self.alive,
             protocol.FIELD_SCORE: self.score,
             protocol.FIELD_GIRTH: round(self.girth, 2),
@@ -700,13 +712,19 @@ class World:
 
     def _kill_player(self, player):
         player.alive = False
+        player.died_at = time.monotonic()
         logging.info(f"Player died (score {player.score})")
         # Leave a carcass of food where the body fell, then record stats.
         self._drop_carcass(player)
         self._persist_life(player)
-        tornado.ioloop.IOLoop.current().call_later(
-            config.RESPAWN_DELAY, self._respawn_player, player.id
-        )
+        # Bots come back on their own. A human stays dead until they click
+        # RESPAWN, so the death card can show the score of the life they just
+        # lost -- respawn() resets it, so a timer would wipe the number out
+        # from under them before they had read it.
+        if player.is_bot:
+            tornado.ioloop.IOLoop.current().call_later(
+                config.RESPAWN_DELAY, self._respawn_player, player.id
+            )
 
     def _drop_carcass(self, player):
         """Scatter food pellets from the dead serpent's body.
@@ -758,6 +776,22 @@ class World:
         account.total_food += player.score
         account.save()
         player.life_persisted = True
+
+    def request_respawn(self, player_id):
+        """Honour a client's RESPAWN click, once the delay has elapsed.
+
+        RESPAWN_DELAY is kept as a floor rather than dropped: it is the beat
+        between dying and coming back, and without it a held mouse button
+        would put a player straight back into the jaws that just ate them.
+        The client greys the button for the same interval, so a rejected
+        request means a stale or hand-rolled client, not an impatient player.
+        """
+        player = self.players.get(player_id)
+        if player is None or player.alive:
+            return
+        if time.monotonic() - player.died_at < config.RESPAWN_DELAY:
+            return
+        self._respawn_player(player_id)
 
     def _respawn_player(self, player_id):
         player = self.players.get(player_id)
@@ -834,6 +868,7 @@ class World:
             protocol.FIELD_BASE_GIRTH: config.BASE_GIRTH,
             protocol.FIELD_MAX_GIRTH: config.MAX_GIRTH,
             protocol.FIELD_TURN_GIRTH_FALLOFF: config.TURN_GIRTH_FALLOFF,
+            protocol.FIELD_RESPAWN_DELAY: config.RESPAWN_DELAY,
             protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
             # Same interest slice as a snapshot, so a joining client is not
             # handed the whole map once and then quietly cut back to its
@@ -917,6 +952,9 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
         # Resizing the window changes how much the client can see.
         if protocol.FIELD_VIEW in data:
             player.set_view_radius(data[protocol.FIELD_VIEW])
+        # The one input a dead player may send.
+        if data.get(protocol.FIELD_RESPAWN):
+            self.application.world.request_respawn(self.player_id)
         target = data.get(protocol.FIELD_TARGET)
         if isinstance(target, dict) and player.alive:
             player.set_target(float(target[protocol.FIELD_X]),

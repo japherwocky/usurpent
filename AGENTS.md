@@ -54,6 +54,15 @@ The client is a Vite + Svelte app in `web/`.
 Keep gameplay/behavior constants server-side in `config.py`; the client only
 renders what the server sends.
 
+Styling goes through the design tokens in `web/src/app.css` -- surfaces, ink,
+accent, radii, shadow -- so the whole UI restyles from one place. Components
+reference `var(--...)`, never literal colors. Two typefaces, and the split
+matters: `--font-display` is Silkscreen, a caps-only bitmap face that renders
+lowercase as uppercase glyphs, so it is for titles, buttons, numerals and
+canvas labels only; body copy, form labels and hints use `--font-ui`. Putting
+a sentence in the display face is how the old lobby ended up shouting its
+form hints.
+
 ## HTTP API (auth)
 
 Auth uses Tornado secure cookies (`user` = signed account id) plus XSRF

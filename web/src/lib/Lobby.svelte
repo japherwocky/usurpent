@@ -1,7 +1,6 @@
 <script>
   import { createEventDispatcher, onMount } from 'svelte';
   import Auth from './Auth.svelte';
-  import { apiGet } from './api.js';
 
   const dispatch = createEventDispatcher();
 
@@ -18,8 +17,19 @@
 
   const NAME_RE = /^[A-Za-z0-9_-]{3,32}$/;
 
+  const CONTROLS = [
+    { action: 'Steer', keys: ['mouse'] },
+    { action: 'Boost', keys: ['click', 'shift'] },
+    { action: 'Stats', keys: ['right-click', 'L'] },
+  ];
+
   let name = randomName();
   let touched = false;
+
+  // Shown under the field only once the player has typed something invalid,
+  // so a first-time visitor sees a clean form rather than a rule they have
+  // not broken yet.
+  $: invalid = touched && name.length > 0 && !NAME_RE.test(name);
 
   onMount(() => {
     // Remember the last name a returning player used.
@@ -52,38 +62,52 @@
 
 <section class="lobby">
   <div class="card">
-    <h1>USURPENT</h1>
-    <p class="pitch">A real-time multiplayer snake. Eat, grow, survive.</p>
+    <header>
+      <h1>USURPENT</h1>
+      <div class="rule"></div>
+      <p class="pitch">Real-time multiplayer snake. Eat, grow, survive.</p>
+    </header>
 
-    <ul class="howto">
-      <li>Move the mouse to steer</li>
-      <li>Click &amp; hold (or hold a key) to boost</li>
-      <li>Right-click for debug / leaderboard</li>
-    </ul>
-
-    <label class="name">
-      <span>Choose a name</span>
+    <div class="name">
       <div class="name-row">
         <input
           bind:value={name}
           on:input={() => (touched = true)}
+          on:keydown={(e) => e.key === 'Enter' && play()}
           maxlength="32"
           autocomplete="off"
           spellcheck="false"
+          aria-label="Your serpent name"
+          aria-invalid={invalid}
           placeholder="your serpent name"
         />
         <button type="button" class="shuffle" on:click={shuffle} title="Pick a random name">
-          random
+          ⟳
         </button>
       </div>
-      <span class="hint">3–32 characters: letters, numbers, _ or -</span>
-    </label>
+      {#if invalid}
+        <span class="hint bad">3–32 characters: letters, numbers, _ or -</span>
+      {/if}
+    </div>
 
     <button class="play" on:click={play}>PLAY</button>
 
-    <div class="auth-wrap">
+    <ul class="controls">
+      {#each CONTROLS as c}
+        <li>
+          <span class="action">{c.action}</span>
+          <span class="keys">
+            {#each c.keys as k, i}
+              {#if i > 0}<span class="or">or</span>{/if}<kbd>{k}</kbd>
+            {/each}
+          </span>
+        </li>
+      {/each}
+    </ul>
+
+    <footer>
       <Auth on:session={onSession} />
-    </div>
+    </footer>
   </div>
 </section>
 
@@ -95,48 +119,47 @@
     justify-content: center;
     padding: 1.5rem;
     overflow: auto;
+    /* A faint glow behind the card so the page isn't a flat black field. */
+    background:
+      radial-gradient(60rem 34rem at 50% 32%, rgba(47, 155, 255, 0.07), transparent 70%);
   }
   .card {
-    width: 22rem;
+    width: 21rem;
     max-width: 100%;
-    padding: 1.5rem;
-    background: #11161d;
-    border: 1px solid #2a323c;
-    border-radius: 0.5rem;
+    padding: 1.75rem 1.5rem 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+  header {
     text-align: center;
   }
   h1 {
     margin: 0;
-    letter-spacing: 0.3em;
+    font-family: var(--font-display);
     font-weight: 700;
-    font-size: 1.8rem;
+    font-size: 1.9rem;
+    letter-spacing: 0.28em;
+    /* Nudge right: the wide tracking adds a trailing gap that reads as the
+       word sitting off-center. */
+    text-indent: 0.28em;
+    color: var(--ink);
+    text-shadow: 0 0 22px var(--glow);
+  }
+  .rule {
+    height: 2px;
+    margin: 0.9rem auto 0;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0.65;
   }
   .pitch {
-    margin: 0.5rem 0 1rem;
-    color: #9fb0c0;
-    font-size: 0.85rem;
-  }
-  .howto {
-    list-style: none;
-    margin: 0 0 1.25rem;
-    padding: 0.75rem;
-    text-align: left;
-    font-size: 0.8rem;
-    color: #c9d6e2;
-    background: #0b0f14;
-    border: 1px solid #1c2530;
-    border-radius: 0.4rem;
-  }
-  .howto li {
-    margin: 0.2rem 0;
+    margin: 0.75rem 0 0;
+    color: var(--ink-faint);
+    font-size: 0.78rem;
   }
   .name {
-    display: flex;
-    flex-direction: column;
-    text-align: left;
-    font-size: 0.8rem;
-    color: #9fb0c0;
-    gap: 0.3rem;
+    margin-top: 1.5rem;
   }
   .name-row {
     display: flex;
@@ -145,46 +168,107 @@
   input {
     flex: 1;
     min-width: 0;
-    padding: 0.45rem 0.5rem;
-    border-radius: 0.3rem;
-    border: 1px solid #2a323c;
-    background: #0b0f14;
-    color: #e6edf3;
+    padding: 0.6rem 0.65rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line);
+    background: var(--sunken);
+    color: var(--ink);
+    font-size: 0.9rem;
+  }
+  input:focus {
+    border-color: var(--accent-deep);
+    outline: none;
+  }
+  input[aria-invalid='true'] {
+    border-color: var(--bad);
   }
   .shuffle {
-    padding: 0.45rem 0.6rem;
-    border: 1px solid #2a323c;
-    border-radius: 0.3rem;
-    background: #1a2230;
-    color: #9fb0c0;
+    width: 2.4rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--ink-dim);
+    font-size: 1rem;
+    line-height: 1;
     cursor: pointer;
   }
   .shuffle:hover {
-    color: #e6edf3;
+    color: var(--accent-hi);
+    border-color: var(--accent-deep);
   }
   .hint {
+    display: block;
+    margin-top: 0.35rem;
     font-size: 0.7rem;
-    color: #6b7c8c;
+    color: var(--ink-faint);
+  }
+  .hint.bad {
+    color: var(--bad);
   }
   .play {
-    margin-top: 1rem;
+    margin-top: 0.75rem;
     width: 100%;
-    padding: 0.6rem;
+    padding: 0.75rem;
     border: none;
-    border-radius: 0.3rem;
-    background: #2f81f7;
-    color: white;
-    font-weight: 700;
-    letter-spacing: 0.15em;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(180deg, var(--accent), var(--accent-deep));
+    color: #fff;
+    font-family: var(--font-display);
+    font-size: 1rem;
+    letter-spacing: 0.22em;
+    text-indent: 0.22em;
     cursor: pointer;
+    box-shadow: 0 0 0 0 var(--glow);
+    transition: box-shadow 140ms ease, filter 140ms ease;
   }
   .play:hover {
-    background: #3b8cff;
+    filter: brightness(1.1);
+    box-shadow: 0 0 22px 0 var(--glow);
   }
-  .auth-wrap {
-    margin-top: 1.25rem;
-    padding-top: 1.25rem;
-    border-top: 1px solid #2a323c;
-    text-align: left;
+  .play:active {
+    filter: brightness(0.95);
+  }
+  .controls {
+    list-style: none;
+    margin: 1.25rem 0 0;
+    padding: 0;
+  }
+  .controls li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+  }
+  .action {
+    font-family: var(--font-display);
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    color: var(--ink-dim);
+  }
+  .keys {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  kbd {
+    padding: 0.12rem 0.4rem;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--sunken);
+    color: var(--ink-dim);
+    font-family: var(--font-ui);
+    font-size: 0.68rem;
+  }
+  .or {
+    color: var(--line-strong);
+  }
+  footer {
+    margin-top: 1.1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
   }
 </style>

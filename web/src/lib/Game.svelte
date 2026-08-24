@@ -10,11 +10,31 @@
   let selfId = null;
   let selfScore = 0;
 
-  // Right-click overlay (leaderboard / legend / debug stats) and boost state.
-  let showOverlay = false;
-  let stats = { fps: 0, tickHz: 0, snapMs: 0, players: 0, humans: 0, bots: 0, food: 0,
-               selfScore: 0, selfGirth: 0, selfLength: 0, selfAlive: true, boosting: false,
-               leaderboard: [] };
+  // Death state. The server keeps a dead human dead until they ask to come
+  // back, so `selfScore` still holds the score of the life they just lost and
+  // the card can show it. `canRespawn` mirrors the server's RESPAWN_DELAY.
+  let alive = true;
+  let deathAt = 0;
+  let canRespawn = false;
+  let respawnBtn;
+
+  // Leaderboard, rebuilt on a timer rather than every frame -- it is a sort
+  // over every player on the map, and nobody can read it at 60 Hz anyway.
+  const BOARD_HZ = 4;
+  const BOARD_ROWS = 5;
+  let board = [];
+  let selfRow = null; // set only when the player is outside the visible rows
+  let lastBoardAt = 0;
+
+  // Right-click panel: frame timings and the bot-strategy legend. Purely a
+  // developer read-out, so it lives in a corner instead of over the game.
+  let showDebug = false;
+  let debug = { fps: 0, tickHz: 0, snapMs: 0, players: 0, humans: 0, bots: 0,
+                food: 0, girth: 0, length: 0, boosting: false };
+  // Controls reminder, faded out once the player has had time to read it.
+  let showHint = true;
+  let hintTimer = 0;
+
   let mouseBoost = false;
   let keyBoost = false;
   let fps = 0;
@@ -36,6 +56,18 @@
   // World units visible across the smaller viewport axis. Smaller = more zoom
   // and a stronger "scrolling" feel.
   const VIEW_WORLD = 600;
+
+  // Leaderboard scores run to six figures; a column of them needs to stay a
+  // column, so anything over a thousand is abbreviated.
+  function short(n) {
+    if (n < 1000) return String(n);
+    if (n < 100000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+    return Math.round(n / 1000) + 'k';
+  }
+
+  // Focus the button the moment it goes live, so Enter or Space respawns
+  // without reaching for the mouse.
+  $: if (canRespawn && respawnBtn) respawnBtn.focus();
 
   function mkParticles() {
     const arr = [];
@@ -64,10 +96,14 @@
     return Math.max(w, h) / s / 2;
   }
 
-  function sendView() {
+  function send(msg) {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'input', view: viewRadius() }));
+      ws.send(JSON.stringify({ type: 'input', ...msg }));
     }
+  }
+
+  function sendView() {
+    send({ view: viewRadius() });
   }
 
   function connect() {
@@ -93,12 +129,6 @@
     };
   }
 
-  function sendTarget(dx, dy) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'input', target: { x: dx, y: dy } }));
-    }
-  }
-
   function onMouseMove(e) {
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
@@ -110,53 +140,67 @@
     const dx = mx - headScreenX;
     const dy = -(my - headScreenY);
     game.selfTarget = { x: dx, y: dy };
-    sendTarget(dx, dy);
+    send({ target: { x: dx, y: dy } });
   }
 
-  function sendBoost(b) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'input', boost: b }));
-    }
-  }
   function updateBoost() {
     const b = mouseBoost || keyBoost;
     game.selfBoosting = b;
-    sendBoost(b);
+    send({ boost: b });
   }
-  function toggleOverlay() {
-    showOverlay = !showOverlay;
+  function toggleDebug() {
+    showDebug = !showDebug;
+  }
+  function respawn() {
+    if (!canRespawn) return;
+    send({ respawn: true });
   }
   function onMouseDown(e) {
-    if (e.button === 0) { mouseBoost = true; updateBoost(); }
+    // Dead serpents don't boost. Gating here rather than stopping propagation
+    // on the death card means the click that hits RESPAWN can't also be read
+    // as a boost, and the a11y tree keeps a plain <div> over the canvas.
+    if (e.button === 0 && alive) { mouseBoost = true; updateBoost(); }
   }
   function onMouseUp(e) {
     if (e.button === 0) { mouseBoost = false; updateBoost(); }
   }
   function onContextMenu(e) {
     e.preventDefault();
-    toggleOverlay();
+    toggleDebug();
   }
-  // Keyboard sketch (full bindings later): Shift = boost, L = toggle overlay.
+  // Keyboard sketch (full bindings later): Shift = boost, L = toggle stats.
   function onKeyDown(e) {
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { keyBoost = true; updateBoost(); }
-    else if (e.code === 'KeyL') { toggleOverlay(); }
+    else if (e.code === 'KeyL') { toggleDebug(); }
   }
   function onKeyUp(e) {
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { keyBoost = false; updateBoost(); }
   }
-  function updateStats() {
+
+  function updateBoard() {
     const players = Object.values(game.players).map((s) => s.server);
-    const bots = players.filter((p) => p.is_bot).length;
-    const self = game.players[game.selfId];
-    const board = players
+    const ranked = players
       .slice()
       .sort((a, b) => b.score - a.score)
-      .map((p) => ({
+      .map((p, i) => ({
+        rank: i + 1,
+        id: p.id,
         name: p.username || (p.is_bot ? 'Bot' : '???'),
         score: p.score,
         color: serpentColor(p),
+        isSelf: p.id === game.selfId,
       }));
-    stats = {
+    board = ranked.slice(0, BOARD_ROWS);
+    // Pin the player's own row underneath when they haven't cracked the top.
+    const mine = ranked.find((r) => r.isSelf);
+    selfRow = mine && mine.rank > BOARD_ROWS ? mine : null;
+  }
+
+  function updateDebug() {
+    const players = Object.values(game.players).map((s) => s.server);
+    const bots = players.filter((p) => p.is_bot).length;
+    const self = game.players[game.selfId];
+    debug = {
       fps: Math.round(fps),
       tickHz: game.sim.tickHz,
       snapMs: Math.round(game.snapInterval),
@@ -164,13 +208,28 @@
       humans: players.length - bots,
       bots,
       food: game.foods.length,
-      selfScore: self ? self.server.score : 0,
-      selfGirth: self ? self.server.girth : 0,
-      selfLength: self ? self.server.length : 0,
-      selfAlive: self ? self.server.alive : false,
+      girth: self ? self.server.girth : 0,
+      length: self ? self.server.length : 0,
       boosting: game.selfBoosting,
-      leaderboard: board,
     };
+  }
+
+  // Watch for the alive -> dead edge (and back) so the death card appears
+  // once, on the transition, rather than being recomputed every frame.
+  function updateLifeState(now) {
+    const self = game.players[game.selfId];
+    const nowAlive = self ? self.server.alive : true;
+    if (nowAlive !== alive) {
+      alive = nowAlive;
+      if (!alive) {
+        deathAt = now;
+        canRespawn = false;
+        showHint = false;
+      }
+    }
+    if (!alive && !canRespawn && now - deathAt >= game.respawnDelay * 1000) {
+      canRespawn = true;
+    }
   }
 
   function draw() {
@@ -311,11 +370,14 @@
     // Snakes. Each body segment is a circle of radius `girth`, stroked so the
     // overlapping circles read as a scaling tube. The head is drawn on top.
     for (const pl of list) {
+      // A dead serpent has already burst into carcass pellets, and the server
+      // sends it with no body. Drawing its head would leave a marker where
+      // there is no longer anything to collide with.
+      if (!pl.alive) continue;
       // Bots are colored by their strategy; humans keep a random palette color.
       const col = serpentColor(pl);
       const girthPx = (pl.girth || 6) * s;
 
-      const bodyAlpha = pl.alive ? 1 : 0.3;
       ctx.fillStyle = col;
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
       ctx.lineWidth = 1;
@@ -327,7 +389,7 @@
           const a = pt.length > 2 ? pt[2] : 1;
           if (a <= 0.01) continue;
           if (!visible(pt[0], pt[1], girthWorld)) continue;
-          ctx.globalAlpha = bodyAlpha * a;
+          ctx.globalAlpha = a;
           const [px, py] = toScreen(pt[0], pt[1]);
           ctx.beginPath();
           ctx.arc(px, py, girthPx * (0.55 + 0.45 * a), 0, Math.PI * 2);
@@ -335,7 +397,7 @@
           ctx.stroke();
         }
       }
-      ctx.globalAlpha = bodyAlpha;
+      ctx.globalAlpha = 1;
 
       // Most serpents on the map are nowhere near the camera; skip the head
       // and its label too, not just the body. The name sits above the head, so
@@ -350,7 +412,7 @@
       ctx.fill();
 
       if (pl.username) {
-        ctx.globalAlpha = pl.alive ? 0.9 : 0.4;
+        ctx.globalAlpha = 0.9;
         ctx.fillStyle = '#e6edf3';
         ctx.font = '11px "Silkscreen", sans-serif';
         ctx.textAlign = 'center';
@@ -368,7 +430,12 @@
     if (dt > 0) fps = fps * 0.9 + (1 / dt) * 0.1;
     game.step(dt);
     draw();
-    if (showOverlay) updateStats();
+    updateLifeState(now);
+    if (now - lastBoardAt >= 1000 / BOARD_HZ) {
+      updateBoard();
+      if (showDebug) updateDebug();
+      lastBoardAt = now;
+    }
     raf = requestAnimationFrame(loop);
   }
 
@@ -385,10 +452,12 @@
     connect();
     lastFrame = performance.now();
     raf = requestAnimationFrame(loop);
+    hintTimer = setTimeout(() => (showHint = false), 7000);
   });
 
   onDestroy(() => {
     cancelAnimationFrame(raf);
+    clearTimeout(hintTimer);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
     window.removeEventListener('resize', sendView);
@@ -396,54 +465,93 @@
   });
 </script>
 
-  <div class="game" role="application" on:mousedown={onMouseDown} on:mouseup={onMouseUp} on:contextmenu={onContextMenu}>
-    <canvas bind:this={canvas} on:mousemove={onMouseMove}></canvas>
-    <div class="hud">
-      <span class="status {status}">{status}</span>
-      {#if selfId}
-        <span class="score">score {selfScore}</span>
-      {/if}
-    </div>
+<div class="game" role="application" on:mousedown={onMouseDown} on:mouseup={onMouseUp} on:contextmenu={onContextMenu}>
+  <canvas bind:this={canvas} on:mousemove={onMouseMove}></canvas>
 
-    {#if showOverlay}
-      <div class="overlay">
-        <div class="panel">
-          <h2>Debug / Leaderboard</h2>
-          <div class="cols">
-            <div class="col">
-              <h3>Stats</h3>
-              <ul>
-                <li>FPS: {stats.fps}</li>
-                <li>Tick rate: {stats.tickHz} Hz</li>
-                <li>Snapshot: {stats.snapMs} ms</li>
-                <li>Players: {stats.players} (humans {stats.humans}, bots {stats.bots})</li>
-                <li>Food: {stats.food}</li>
-                <li>You — score {stats.selfScore}, girth {stats.selfGirth}, length {stats.selfLength}, {stats.selfAlive ? 'alive' : 'dead'}{stats.boosting ? ', BOOSTING' : ''}</li>
-              </ul>
-            </div>
-            <div class="col">
-              <h3>Leaderboard</h3>
-              <ol>
-                {#each stats.leaderboard as p}
-                  <li><span class="swatch" style="background:{p.color}"></span>{p.name} — {p.score}</li>
-                {/each}
-              </ol>
-            </div>
-            <div class="col">
-              <h3>Legend</h3>
-              <ul>
-                {#each legend as s}
-                  <li><span class="swatch" style="background:{s.color}"></span>{s.name}</li>
-                {/each}
-                <li><span class="swatch" style="background:linear-gradient(90deg,#1f77b4,#ff7f0e)"></span>Humans (random)</li>
-              </ul>
-              <p class="hint">Left-click / Shift: boost · Right-click / L: toggle this</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    {/if}
+  <!-- Score. The one number the player is actually playing for, so it gets
+       the display face and the size to match. -->
+  <div class="hud-score">
+    <span class="label">Score</span>
+    {#key selfScore}
+      <span class="value">{selfScore.toLocaleString()}</span>
+    {/key}
   </div>
+
+  <!-- Connection state only surfaces when there is something wrong with it.
+       A permanent "open" badge is a developer's reassurance, not a player's. -->
+  {#if status !== 'open'}
+    <div class="conn {status}">
+      {status === 'connecting' ? 'Connecting…' : 'Disconnected'}
+    </div>
+  {/if}
+
+  {#if board.length}
+    <div class="board">
+      <h2>Leaderboard</h2>
+      <ol>
+        {#each board as row (row.id)}
+          <li class:me={row.isSelf}>
+            <span class="rank">{row.rank}</span>
+            <span class="swatch" style="background:{row.color}"></span>
+            <span class="who">{row.name}</span>
+            <span class="pts">{short(row.score)}</span>
+          </li>
+        {/each}
+        {#if selfRow}
+          <li class="me pinned">
+            <span class="rank">{selfRow.rank}</span>
+            <span class="swatch" style="background:{selfRow.color}"></span>
+            <span class="who">{selfRow.name}</span>
+            <span class="pts">{short(selfRow.score)}</span>
+          </li>
+        {/if}
+      </ol>
+    </div>
+  {/if}
+
+  <div class="hint" class:gone={!showHint}>
+    <kbd>mouse</kbd> steer <span class="dot">·</span>
+    <kbd>click</kbd> boost <span class="dot">·</span>
+    <kbd>right-click</kbd> stats
+  </div>
+
+  {#if showDebug}
+    <div class="debug">
+      <h2>Stats</h2>
+      <dl>
+        <dt>fps</dt><dd>{debug.fps}</dd>
+        <dt>tick</dt><dd>{debug.tickHz} Hz</dd>
+        <dt>snapshot</dt><dd>{debug.snapMs} ms</dd>
+        <dt>players</dt><dd>{debug.humans}H / {debug.bots}B</dd>
+        <dt>food</dt><dd>{debug.food}</dd>
+        <dt>girth</dt><dd>{debug.girth}</dd>
+        <dt>length</dt><dd>{debug.length}{debug.boosting ? ' · boost' : ''}</dd>
+      </dl>
+      <h2>Legend</h2>
+      <ul>
+        {#each legend as s}
+          <li><span class="swatch" style="background:{s.color}"></span>{s.name}</li>
+        {/each}
+        <li><span class="swatch" style="background:linear-gradient(90deg,#1f77b4,#ff7f0e)"></span>humans</li>
+      </ul>
+    </div>
+  {/if}
+
+  {#if !alive}
+    <div class="death">
+      <div class="death-card">
+        <h2>You died</h2>
+        <div class="final">
+          <span class="label">Score</span>
+          <span class="value">{selfScore.toLocaleString()}</span>
+        </div>
+        <button bind:this={respawnBtn} class="respawn" on:click={respawn} disabled={!canRespawn}>
+          RESPAWN
+        </button>
+      </div>
+    </div>
+  {/if}
+</div>
 
 <style>
   .game {
@@ -457,51 +565,287 @@
     inset: 0;
     width: 100%;
     height: 100%;
-    background: #0b0f14;
+    background: var(--bg);
     cursor: crosshair;
   }
-  .hud {
+
+  /* --- Score ------------------------------------------------------------ */
+  .hud-score {
     position: absolute;
-    top: 0.5rem;
-    left: 0.5rem;
-    display: flex;
-    gap: 0.75rem;
-    font-size: 0.8rem;
-    color: #9fb0c0;
+    top: 0.9rem;
+    left: 1.1rem;
     pointer-events: none;
   }
-  .status.open {
-    color: #3fb950;
+  .hud-score .label {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 0.6rem;
+    letter-spacing: 0.22em;
+    color: var(--ink-faint);
   }
-  .status.closed,
-  .status.connecting {
-    color: #d29922;
+  .hud-score .value {
+    display: block;
+    margin-top: 0.15rem;
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    line-height: 1;
+    color: var(--ink);
+    text-shadow: 0 0 18px var(--glow);
+    /* Re-keyed on every change, so the animation replays as you eat. */
+    animation: pop 220ms ease-out;
   }
-  .overlay {
+  @keyframes pop {
+    from { transform: scale(1.18); color: var(--accent-hi); }
+    to { transform: scale(1); color: var(--ink); }
+  }
+
+  /* --- Connection ------------------------------------------------------- */
+  .conn {
+    position: absolute;
+    top: 0.9rem;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.3rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    background: rgba(7, 11, 18, 0.85);
+    font-size: 0.72rem;
+    pointer-events: none;
+  }
+  .conn.connecting { color: var(--warn); }
+  .conn.closed { color: var(--bad); }
+
+  /* --- Leaderboard ------------------------------------------------------ */
+  .board {
+    position: absolute;
+    top: 0.9rem;
+    right: 1.1rem;
+    width: 12.5rem;
+    padding: 0.6rem 0.7rem 0.5rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(13, 20, 31, 0.72);
+    backdrop-filter: blur(6px);
+    pointer-events: none;
+  }
+  .board h2 {
+    margin: 0 0 0.45rem;
+    font-family: var(--font-display);
+    font-size: 0.58rem;
+    letter-spacing: 0.18em;
+    color: var(--ink-faint);
+  }
+  .board ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .board li {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.15rem 0;
+    font-size: 0.74rem;
+    color: var(--ink-dim);
+  }
+  .board .rank {
+    width: 1.1rem;
+    font-family: var(--font-display);
+    font-size: 0.6rem;
+    color: var(--ink-faint);
+  }
+  .board .who {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .board .pts {
+    font-family: var(--font-display);
+    font-size: 0.68rem;
+    color: var(--ink);
+  }
+  .board li.me {
+    color: var(--accent-hi);
+  }
+  .board li.me .pts,
+  .board li.me .rank {
+    color: var(--accent-hi);
+  }
+  /* Your own row, pinned below the cut when you aren't in the top five. */
+  .board li.pinned {
+    margin-top: 0.25rem;
+    padding-top: 0.35rem;
+    border-top: 1px dashed var(--line);
+  }
+  .swatch {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+  }
+
+  /* --- Controls hint ---------------------------------------------------- */
+  .hint {
+    position: absolute;
+    left: 50%;
+    bottom: 1.1rem;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 900ms ease;
+  }
+  .hint.gone {
+    opacity: 0;
+  }
+  .hint kbd {
+    padding: 0.1rem 0.35rem;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: rgba(6, 10, 16, 0.8);
+    font-family: var(--font-ui);
+    font-size: 0.68rem;
+    color: var(--ink-dim);
+  }
+  .hint .dot {
+    color: var(--line-strong);
+  }
+
+  /* --- Debug panel ------------------------------------------------------ */
+  .debug {
+    position: absolute;
+    left: 1.1rem;
+    bottom: 1.1rem;
+    width: 11rem;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(13, 20, 31, 0.82);
+    backdrop-filter: blur(6px);
+    pointer-events: none;
+  }
+  .debug h2 {
+    margin: 0 0 0.35rem;
+    font-family: var(--font-display);
+    font-size: 0.58rem;
+    letter-spacing: 0.18em;
+    color: var(--ink-faint);
+  }
+
+  .debug dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.1rem 0.5rem;
+    /* Room between the stats block and the legend heading under it. */
+    margin: 0 0 0.85rem;
+    font-size: 0.7rem;
+  }
+  .debug dt {
+    color: var(--ink-faint);
+  }
+  .debug dd {
+    margin: 0;
+    text-align: right;
+    font-family: var(--font-mono);
+    color: var(--ink-dim);
+  }
+  .debug ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.7rem;
+    color: var(--ink-dim);
+  }
+  .debug li {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.08rem 0;
+  }
+
+  /* --- Death card ------------------------------------------------------- */
+  .death {
     position: absolute;
     inset: 0;
-    background: rgba(5, 8, 12, 0.72);
     display: flex;
     align-items: center;
     justify-content: center;
-    pointer-events: none;
+    background: radial-gradient(40rem 26rem at 50% 50%, rgba(7, 11, 18, 0.82), rgba(7, 11, 18, 0.55));
     z-index: 10;
   }
-  .panel {
-    background: #0e141b;
-    border: 1px solid #2a3642;
-    border-radius: 8px;
-    padding: 1rem 1.25rem;
-    color: #c9d6e2;
-    font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
-    max-width: 92vw;
+  .death-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.75rem 2.5rem;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    animation: rise 220ms ease-out;
   }
-  .panel h2 { margin: 0 0 0.5rem; font-size: 15px; color: #e6edf3; }
-  .panel h3 { margin: 0.5rem 0 0.25rem; font-size: 12px; color: #9fb0c0; text-transform: uppercase; letter-spacing: 0.04em; }
-  .cols { display: flex; gap: 2rem; flex-wrap: wrap; }
-  .col { min-width: 190px; }
-  .panel ul, .panel ol { margin: 0; padding-left: 1.1rem; }
-  .panel li { margin: 2px 0; }
-  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
-  .hint { margin-top: 0.75rem; color: #6b7c8c; font-size: 11px; }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; }
+  }
+  .death-card h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    letter-spacing: 0.2em;
+    text-indent: 0.2em;
+    color: var(--bad);
+  }
+  .final {
+    text-align: center;
+  }
+  .final .label {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 0.58rem;
+    letter-spacing: 0.22em;
+    color: var(--ink-faint);
+  }
+  .final .value {
+    display: block;
+    margin-top: 0.25rem;
+    font-family: var(--font-display);
+    font-size: 2.1rem;
+    line-height: 1;
+    color: var(--ink);
+    text-shadow: 0 0 18px var(--glow);
+  }
+  .respawn {
+    padding: 0.7rem 2rem;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(180deg, var(--accent), var(--accent-deep));
+    color: #fff;
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    letter-spacing: 0.2em;
+    text-indent: 0.2em;
+    cursor: pointer;
+    transition: box-shadow 140ms ease, filter 140ms ease;
+  }
+  .respawn:hover:not(:disabled) {
+    filter: brightness(1.1);
+    box-shadow: 0 0 22px 0 var(--glow);
+  }
+  /* Greyed for the server's RESPAWN_DELAY: the request would be rejected
+     until then, so the button should not invite the click. */
+  .respawn:disabled {
+    background: var(--surface-2);
+    color: var(--ink-faint);
+    cursor: default;
+  }
 </style>

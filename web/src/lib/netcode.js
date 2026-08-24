@@ -242,6 +242,10 @@ export class Game {
     this.selfTarget = { x: 0, y: 0 };
     this.selfBoosting = false; // mirror of the held boost control, for prediction
     this.foodSpawnRadius = 0; // radius of the central food-spawn circle
+    // Seconds the server makes a dead player wait before it will honour a
+    // respawn request. The death card greys its button for the same interval;
+    // the real value arrives in the welcome so the two cannot drift apart.
+    this.respawnDelay = 1.5;
     this.onScore = null; // (score:number) => void, called when self score changes
   }
 
@@ -262,6 +266,7 @@ export class Game {
     if (msg.boost_multiplier !== undefined) this.sim.boostMultiplier = msg.boost_multiplier;
     if (msg.segment_spacing_factor !== undefined) this.sim.segmentSpacingFactor = msg.segment_spacing_factor;
     if (msg.min_segment_spacing !== undefined) this.sim.minSegmentSpacing = msg.min_segment_spacing;
+    if (msg.respawn_delay !== undefined) this.respawnDelay = msg.respawn_delay;
     this.players = {};
     msg.players.forEach((p) => (this.players[p.id] = makeState(p, this.selfId)));
     this.foods = msg.food || [];

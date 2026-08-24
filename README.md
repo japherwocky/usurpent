@@ -119,8 +119,11 @@ routes - no separate frontend server needed.
 1. Start the backend and frontend dev server as described above
 2. Open the Vite dev URL and pick a name (or leave it blank for a random one)
 3. Click **PLAY**
-4. Move your mouse to steer; click and hold (or hold a key) to boost
-5. Right-click for the debug/leaderboard overlay
+4. Move your mouse to steer; click and hold (or hold Shift) to boost
+5. Watch your score top-left and the leaderboard top-right
+6. Right-click (or press `L`) for the stats panel and the bot-strategy legend
+7. When you die, the card shows the score of that life; click **RESPAWN** to
+   go again
 
 ## Game Mechanics
 
@@ -130,7 +133,12 @@ routes - no separate frontend server needed.
   hit distance is the two serpents' girths added, so bigger snakes are both
   bulkier and easier to clip — tune via `BASE_GIRTH` / `GIRTH_PER_FOOD` /
   `MAX_GIRTH` in `config.py`. Touching a world border also kills
-- **Score**: food pickups increment score; resets on death
+- **Score**: food pickups increment score; resets on respawn, not on death,
+  so the death card can show what the life you just lost was worth
+- **Respawn**: bots come back on a `RESPAWN_DELAY` timer; a human stays dead
+  until they click **RESPAWN**, which the server honours once the same delay
+  has passed. A dead serpent ships no body -- its remains are already on the
+  map as carcass pellets, and a corpse cannot kill anyone
 - **Pellet gravity**: loose food drifts toward nearby food and merges on
   contact, so a scattered carcass slowly gathers into a few fat blobs. Merging
   conserves value exactly, so a blob is worth what its crumbs were
