@@ -451,8 +451,11 @@ class World:
     # bare combined radius made every merge scan four times the candidates it
     # needed to. Deriving it keeps that honest if the overlap is ever retuned.
     def _fine_cell(self):
-        merge_reach = (config.FOOD_MERGE_MAX_RADIUS * 2.0
-                       * config.FOOD_MERGE_OVERLAP)
+        # Both arms of the merge rule, or the grid stops covering the reach
+        # that queries it the moment FOOD_MERGE_OVERLAP is tuned down.
+        merge_reach = max(config.FOOD_MERGE_MAX_RADIUS * 2.0
+                          * config.FOOD_MERGE_OVERLAP,
+                          config.FOOD_MERGE_MAX_RADIUS)
         pickup_reach = config.FOOD_MERGE_MAX_RADIUS + config.FOOD_PICKUP_PAD
         return max(1.0, merge_reach, pickup_reach)
 
@@ -648,7 +651,17 @@ class World:
                 other = self.foods.get(nid)
                 if other is None:
                     continue
-                touch = (food["r"] + other["r"]) * config.FOOD_MERGE_OVERLAP
+                # The overlap fraction is measured on the SUM of the radii,
+                # which is right for two pellets of a size and wrong when one
+                # dwarfs the other: at r=34 against r=2 it puts the merge at
+                # 28.8, INSIDE the big pellet's own radius, so a crumb whose
+                # centre was well within the blob would not fuse and had to be
+                # dragged the last five units by gravity -- several seconds
+                # sat visibly inside it. Whichever threshold is larger wins,
+                # so a crumb fuses once its centre crosses the blob's edge and
+                # evenly matched pellets keep the behaviour they had.
+                big = food["r"] if food["r"] > other["r"] else other["r"]
+                touch = max((food["r"] + other["r"]) * config.FOOD_MERGE_OVERLAP, big)
                 if math.hypot(other["x"] - food["x"], other["y"] - food["y"]) >= touch:
                     continue
                 m1, m2 = food["value"], other["value"]
