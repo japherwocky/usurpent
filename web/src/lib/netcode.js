@@ -26,6 +26,15 @@ export const STRATEGY_COLORS = {
   wanderer: '#4dd2ff',
 };
 
+// How quickly a correction is paid off, in seconds. One snapshot interval, so
+// roughly two thirds of an error is gone before the next one lands: corrections
+// blend into each other rather than stacking up into rubber-banding.
+const SMOOTH_TAU = 0.05;
+// Past this the client has not mispredicted, it has lost the thread -- a
+// respawn, a teleport, a long stall. Take the jump rather than sliding a huge
+// offset in over a quarter second.
+const RESYNC_DISTANCE = 40;
+
 export function colorFor(id) {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
@@ -165,7 +174,7 @@ function queuedPoints(st, alpha) {
 // how far the head has pulled past the newest point instead: at a full spacing
 // a new point is appended and the oldest dropped, and both alphas hand over at
 // exactly the same moment, so the cycle is seamless.
-function localPoints(local, sim) {
+function localPoints(local, sim, ox, oy) {
   const pts = local.points;
   if (!pts.length) return [];
   const girth = local.girth || sim.baseGirth;
@@ -179,9 +188,11 @@ function localPoints(local, sim) {
   // growing nothing is being dropped, so the tail must stay solid.
   const atCapacity = pts.length >= maxPoints;
   return pts.map((p, i) => {
-    if (i === pts.length - 1 && pts.length > 1) return [p[0], p[1], frac];
-    if (i === 0 && atCapacity && pts.length > 1) return [p[0], p[1], 1 - frac];
-    return [p[0], p[1], 1];
+    const x = p[0] + ox;
+    const y = p[1] + oy;
+    if (i === pts.length - 1 && pts.length > 1) return [x, y, frac];
+    if (i === 0 && atCapacity && pts.length > 1) return [x, y, 1 - frac];
+    return [x, y, 1];
   });
 }
 
@@ -205,15 +216,39 @@ function makeState(p, selfId) {
   };
 }
 
-// Snap local prediction to the server's truth so error can't accumulate.
+// Take the server's truth into the state, but not into the picture all at
+// once. The state is overwritten exactly as before, so error still cannot
+// accumulate; what is left behind is a visual offset that decays over the next
+// few frames, so a correction slides in instead of popping.
 function reconcileLocal(st) {
-  if (!st.local) st.local = cloneLocal(st.server);
+  if (!st.local) {
+    st.local = cloneLocal(st.server);
+    st.err = null;
+    return;
+  }
+  // The rendered position is local + err. For it not to jump when local is
+  // overwritten, err has to absorb exactly what local gives up -- so the new
+  // offset is the prediction error plus whatever of the last one is still
+  // showing. That makes the handover continuous by construction.
+  const ex = st.local.x - st.server.x + (st.err ? st.err.x : 0);
+  const ey = st.local.y - st.server.y + (st.err ? st.err.y : 0);
   st.local.x = st.server.x;
   st.local.y = st.server.y;
   st.local.heading = st.server.heading;
-  st.local.points = st.server.points.map((pt) => [pt[0], pt[1]]);
   st.local.length = st.server.length;
   st.local.girth = st.server.girth;
+
+  if (Math.hypot(ex, ey) > RESYNC_DISTANCE) {
+    st.local.points = st.server.points.map((pt) => [pt[0], pt[1]]);
+    st.err = null;
+    return;
+  }
+  // Keep the locally laid body. Both sides now lay points by the same rule on
+  // the same path (see stepLocal), so overwriting it every snapshot swapped
+  // one sampling of that path for another -- the end-of-body pop that outlived
+  // the spacing fix. Points the client laid are as good as the ones it would
+  // have been handed, and they are already on screen.
+  st.err = { x: ex, y: ey };
 }
 
 function stepLocal(local, dt, target, mapW, mapH, sim, boost) {
@@ -267,12 +302,14 @@ function stepLocal(local, dt, target, mapW, mapH, sim, boost) {
 
 function renderState(st, alpha, sim) {
   if (st.isSelf && st.local && st.server.alive) {
+    const ox = st.err ? st.err.x : 0;
+    const oy = st.err ? st.err.y : 0;
     return {
       id: st.server.id,
-      x: st.local.x,
-      y: st.local.y,
+      x: st.local.x + ox,
+      y: st.local.y + oy,
       heading: st.local.heading,
-      points: localPoints(st.local, sim),
+      points: localPoints(st.local, sim, ox, oy),
       alive: st.server.alive,
       score: st.server.score,
       girth: st.server.girth,
@@ -377,6 +414,14 @@ export class Game {
     const st = this.players[this.selfId];
     if (st && st.local && st.server && st.server.alive) {
       stepLocal(st.local, dt, this.selfTarget, this.mapW, this.mapH, this.sim, this.selfBoosting);
+    }
+    // Pay off the outstanding correction. Exponential, so the rate is
+    // framerate-independent: a slow frame settles as much as three quick ones.
+    if (st && st.err) {
+      const k = Math.exp(-dt / SMOOTH_TAU);
+      st.err.x *= k;
+      st.err.y *= k;
+      if (Math.abs(st.err.x) < 0.02 && Math.abs(st.err.y) < 0.02) st.err = null;
     }
   }
 
