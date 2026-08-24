@@ -68,7 +68,7 @@ MAX_GIRTH = _env_float("USURPENT_MAX_GIRTH", 24.0)
 # (value = round(radius / FOOD_RADIUS_PER_VALUE), minimum 1). Eating a pellet
 # adds `value` to score and `value * FOOD_GROWTH` to tail length.
 BODY_GROWTH = _env_int("USURPENT_BODY_GROWTH", 2)             # world-length units per pellet value
-FOOD_COUNT = _env_int("USURPENT_FOOD_COUNT", 30)               # initial seed at start
+FOOD_COUNT = _env_int("USURPENT_FOOD_COUNT", 4000)             # initial seed at start
 FOOD_BASE_RADIUS = _env_float("USURPENT_FOOD_BASE_RADIUS", 5.0)
 FOOD_RADIUS_PER_VALUE = _env_float("USURPENT_FOOD_RADIUS_PER_VALUE", 10.0)
 FOOD_PICKUP_PAD = _env_float("USURPENT_FOOD_PICKUP_PAD", 10.0) # added to pellet radius for pickup
@@ -76,9 +76,41 @@ FOOD_PICKUP_PAD = _env_float("USURPENT_FOOD_PICKUP_PAD", 10.0) # added to pellet
 # Continuous spawning: instead of a fixed pool that runs out, the server drops
 # new food on a timer inside a circle centered on the map. This keeps the game
 # going indefinitely.
-FOOD_SPAWN_INTERVAL = _env_float("USURPENT_FOOD_SPAWN_INTERVAL", 5.0)  # seconds
+# One pellet every five seconds could never fill a field of thousands, let
+# alone keep up with seven snakes eating, so the timer drops a batch. Together
+# these top the map up at FOOD_SPAWN_BATCH / FOOD_SPAWN_INTERVAL pellets a
+# second, which comfortably outpaces consumption and holds the field near
+# FOOD_MAX -- the spawner stops there.
+FOOD_SPAWN_INTERVAL = _env_float("USURPENT_FOOD_SPAWN_INTERVAL", 0.2)  # seconds
+FOOD_SPAWN_BATCH = _env_int("USURPENT_FOOD_SPAWN_BATCH", 8)            # pellets per drop
 FOOD_SPAWN_RADIUS = _env_int("USURPENT_FOOD_SPAWN_RADIUS", 4000)       # from map center
-FOOD_MAX = _env_int("USURPENT_FOOD_MAX", 1000)                         # cap to bound growth
+# Cap to bound growth. 8000 measures at 44% of the tick budget at its peak
+# with four players connected, which leaves room for a carcass landing on a
+# bad tick. Past about 10000 the margin gets thin enough that a GC pause could
+# overrun a tick.
+FOOD_MAX = _env_int("USURPENT_FOOD_MAX", 8000)
+# Interest management: a client is only sent the food inside a box this far
+# either side of its head, rather than the whole map. Snapshot size stops
+# tracking the size of the world and starts tracking what you can actually
+# see, which is what lets FOOD_MAX be in the thousands.
+#
+# This must exceed any client's half-viewport or pellets pop in at the screen
+# edge, but every unit past that is bandwidth spent on food nobody can see.
+# The client shows VIEW_WORLD (600) units across its SHORTER axis, so width is
+# what stretches: 1280x800 needs 480, 3440x1440 needs 717, and a 5120x1440
+# super-ultrawide 1067. 1200 covers all of them with room for the head to
+# travel between snapshots.
+#
+# The server cannot know a given window, so this is sized for the widest one.
+# Having clients report their viewport would let it track the actual window
+# and cut the payload again for the common case.
+INTEREST_RADIUS = _env_float("USURPENT_INTEREST_RADIUS", 1200.0)
+# Floor for a client-reported view distance, so a bogus or hostile value
+# cannot leave someone unable to see the food in front of them.
+INTEREST_MIN_RADIUS = _env_float("USURPENT_INTEREST_MIN_RADIUS", 400.0)
+# Added to whatever a client reports, covering the ground its head can cover
+# between snapshots plus a little slack so pellets are never seen arriving.
+INTEREST_MARGIN = _env_float("USURPENT_INTEREST_MARGIN", 120.0)
 
 # Death: a slain serpent leaves a carcass of food pellets -- one per body
 # segment, sized from its girth. Dropped pellets render at lower opacity.

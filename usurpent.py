@@ -180,7 +180,26 @@ class Player:
         # Food eaten across this whole session (all lives); persists across
         # respawns. Per-life score lives in self.score (reset on respawn).
         self.session_food = 0
+        # How far this client can see, for interest management. Starts at the
+        # full radius so a client that never reports one still sees everything
+        # it could need; clamped down to what it asks for once it does.
+        self.view_radius = config.INTEREST_RADIUS
         self.respawn(x, y)
+
+    def set_view_radius(self, raw):
+        """Adopt a client-reported view distance, clamped to sane bounds.
+
+        Clamped low so a bad value cannot blind a player, and high so nobody
+        can ask for the whole map and see every pellet on it.
+        """
+        try:
+            want = float(raw)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(want):
+            return
+        self.view_radius = max(config.INTEREST_MIN_RADIUS,
+                               min(config.INTEREST_RADIUS, want))
 
     def respawn(self, x, y):
         """Reset to a live snake at (x, y). Used on spawn and after death."""
@@ -319,6 +338,11 @@ class World:
             "value": value,
             "dropped": dropped,
             "owner": owner,
+            # Which gravity rota this pellet belongs to. Stored rather than
+            # derived, because int(fid) on every pellet every tick is real
+            # money once the field is in the thousands. Ids are sequential, so
+            # this spreads a carcass evenly across the rota.
+            "shard": self._food_next % max(1, config.FOOD_GRAVITY_SHARDS),
         }
 
     def _make_room(self, wanted):
@@ -345,17 +369,54 @@ class World:
                 free += 1
         return max(0, min(wanted, free))
 
-    def _food_buckets(self, cell):
-        """Bucket pellets into a uniform grid of `cell`-sized squares.
+    # Fine grid cell. Merging and pickup both walk a 3x3 block of it, so the
+    # cell has to cover the longer of the two reaches or a 3x3 could miss a
+    # hit: two max-size blobs fusing, or a head on a max-size blob.
+    #
+    # Note the merge reach carries the overlap factor. Two max-size blobs only
+    # fuse once they are FOOD_MERGE_OVERLAP of their combined radii apart --
+    # at the default 0.25 that is 17 units, not 68, so sizing the cell at the
+    # bare combined radius made every merge scan four times the candidates it
+    # needed to. Deriving it keeps that honest if the overlap is ever retuned.
+    def _fine_cell(self):
+        merge_reach = (config.FOOD_MERGE_MAX_RADIUS * 2.0
+                       * config.FOOD_MERGE_OVERLAP)
+        pickup_reach = config.FOOD_MERGE_MAX_RADIUS + config.FOOD_PICKUP_PAD
+        return max(1.0, merge_reach, pickup_reach)
 
-        Both gravity passes only ever care about pellets within one cell of
-        each other, so this keeps them O(n * neighbours). The naive all-pairs
-        form would be a million distance checks per tick at FOOD_MAX.
+    def _index_food(self):
+        """Build everything the tick needs from ONE walk of the food list.
+
+        Walking thousands of pellets is itself the expensive part once the
+        field is large, so gravity, merging, pickup and interest queries all
+        come out of a single pass:
+
+        - `mesh`: per-cell mass aggregate for gravity (see _attract_food).
+        - `fine`: pellet ids bucketed for merge and pickup proximity tests.
+        - `shard`: the ids whose turn it is on the gravity rota.
         """
-        buckets = defaultdict(list)
+        attract_cell = config.FOOD_ATTRACT_RADIUS
+        fine_cell = self._fine_cell()
+        turn = self.tick_count % max(1, config.FOOD_GRAVITY_SHARDS)
+        mesh = {}
+        fine = defaultdict(list)
+        shard = []
         for fid, food in self.foods.items():
-            buckets[(int(food["x"] // cell), int(food["y"] // cell))].append(fid)
-        return buckets
+            x = food["x"]
+            y = food["y"]
+            v = food["value"]
+            key = (int(x // attract_cell), int(y // attract_cell))
+            agg = mesh.get(key)
+            if agg is None:
+                mesh[key] = [v, x * v, y * v]
+            else:
+                agg[0] += v
+                agg[1] += x * v
+                agg[2] += y * v
+            fine[(int(x // fine_cell), int(y // fine_cell))].append(fid)
+            if food["shard"] == turn:
+                shard.append(fid)
+        return mesh, attract_cell, fine, fine_cell, shard
 
     def _food_neighbours(self, buckets, cx, cy):
         """Pellet ids in the 3x3 block of cells around (cx, cy)."""
@@ -365,63 +426,80 @@ class World:
                 if bucket:
                     yield from bucket
 
-    def _attract_food(self, dt):
-        """Drift pellets toward the pull of their neighbours.
+    def _attract_food(self, dt, mesh, cell, shard, step_dt):
+        """Drift pellets toward the mass around them.
 
-        The pull is mass-weighted, so crumbs fall into blobs rather than
-        everything sliding equally, and a pellet's own drift speed falls off
-        with its value -- a fat blob is sluggish and acts as the anchor.
-        Positions are read before any are written, so the pass is
-        simultaneous and does not depend on dict order.
+        This reads a per-cell mass aggregate rather than visiting neighbours
+        one by one. Scanning neighbours meant the work per pellet grew with
+        how many pellets were nearby, so the pass was quadratic in field size
+        -- measured at 10 neighbours each at 5k pellets and 88 each at 50k,
+        which put it at a quarter of a second per tick. Against the mesh each
+        pellet reads nine cell totals whatever the density, so the pass is
+        linear and a big field costs what a small one does per pellet.
 
-        Only one shard of pellets moves per tick (ids are handed out in
-        sequence, so a carcass spreads itself evenly across the rota). The
-        step is scaled by the shard count to keep the effective speed the
-        same as moving everything every tick -- sharding is a cost trick,
-        not a speed one. Bucketing still walks every pellet, since a moving
-        pellet is pulled by stationary neighbours too, but that is a plain
-        dict insert; the 3x3 neighbourhood scan is the part being amortised.
+        Each cell contributes its centre of mass, weighted by its total value
+        and normalised by distance -- a direction, not an inverse-square
+        blow-up at point-blank range, where pellets in a fresh carcass sit on
+        top of each other. The pellet's own mass is removed from its own
+        cell's aggregate, or it would be pulled toward itself.
+
+        Drift speed still falls off with the pellet's own value, so crumbs
+        fall into blobs and a fat blob anchors. Positions are read before any
+        are written, so the pass is simultaneous and order-independent.
+
+        Only the shard whose turn it is moves, with the step scaled to match,
+        so sharding buys cost and not slowness. Because the mesh is summed
+        over whole cells the effective reach is the 3x3 block rather than a
+        hard radius -- a slightly wider, smoother field than the old scan.
         """
-        shards = max(1, config.FOOD_GRAVITY_SHARDS)
-        turn = self.tick_count % shards
-        step_dt = dt * shards
-        cell = config.FOOD_ATTRACT_RADIUS
-        buckets = self._food_buckets(cell)
-        reach2 = cell * cell
+        if not shard:
+            return
+        speed_base = config.FOOD_ATTRACT_SPEED
         moves = []
-        for fid, food in self.foods.items():
-            if int(fid) % shards != turn:
+        for fid in shard:
+            food = self.foods.get(fid)
+            if food is None:
                 continue
-            fx, fy = food["x"], food["y"]
+            fx = food["x"]
+            fy = food["y"]
+            fv = food["value"]
+            cx = int(fx // cell)
+            cy = int(fy // cell)
             ax = ay = 0.0
-            cx, cy = int(fx // cell), int(fy // cell)
-            for nid in self._food_neighbours(buckets, cx, cy):
-                if nid == fid:
-                    continue
-                other = self.foods[nid]
-                dx = other["x"] - fx
-                dy = other["y"] - fy
-                d2 = dx * dx + dy * dy
-                if 0.0 < d2 < reach2:
-                    # Weight by the neighbour's mass, normalised by distance so
-                    # this is a direction, not an inverse-square blow-up at
-                    # point-blank range (pellets sit on top of each other in a
-                    # fresh carcass).
-                    inv = other["value"] / math.sqrt(d2)
+            for gx in (cx - 1, cx, cx + 1):
+                for gy in (cy - 1, cy, cy + 1):
+                    agg = mesh.get((gx, gy))
+                    if agg is None:
+                        continue
+                    m = agg[0]
+                    sx = agg[1]
+                    sy = agg[2]
+                    if gx == cx and gy == cy:
+                        # Take this pellet back out of its own cell's total.
+                        m -= fv
+                        sx -= fx * fv
+                        sy -= fy * fv
+                    if m <= 0.0:
+                        continue
+                    dx = sx / m - fx
+                    dy = sy / m - fy
+                    d2 = dx * dx + dy * dy
+                    if d2 <= 0.0:
+                        continue
+                    inv = m / math.sqrt(d2)
                     ax += dx * inv
                     ay += dy * inv
             mag = math.hypot(ax, ay)
             if mag <= 0.0:
                 continue
-            speed = config.FOOD_ATTRACT_SPEED / math.sqrt(food["value"])
-            step = speed * step_dt
+            step = speed_base / math.sqrt(fv) * step_dt
             moves.append((fid, fx + ax / mag * step, fy + ay / mag * step))
         for fid, nx, ny in moves:
             food = self.foods[fid]
             food["x"] = min(float(config.MAP_WIDTH), max(0.0, nx))
             food["y"] = min(float(config.MAP_HEIGHT), max(0.0, ny))
 
-    def _merge_food(self):
+    def _merge_food(self, buckets, cell, shard):
         """Combine pellets that have drifted into contact.
 
         Value is conserved exactly (a blob is worth its crumbs), while the
@@ -434,16 +512,12 @@ class World:
         still drawn from every pellet, so a touching pair fuses as soon as
         either side's turn comes round -- at worst a shard-rota later.
         """
-        shards = max(1, config.FOOD_GRAVITY_SHARDS)
-        turn = self.tick_count % shards
-        cell = max(1.0, config.FOOD_MERGE_MAX_RADIUS * 2.0)
-        buckets = self._food_buckets(cell)
         consumed = set()
-        for fid in list(self.foods.keys()):
-            if fid in consumed or int(fid) % shards != turn:
+        for fid in shard:
+            if fid in consumed:
                 continue
-            food = self.foods[fid]
-            if food["r"] >= config.FOOD_MERGE_MAX_RADIUS:
+            food = self.foods.get(fid)
+            if food is None or food["r"] >= config.FOOD_MERGE_MAX_RADIUS:
                 continue
             cx, cy = int(food["x"] // cell), int(food["y"] // cell)
             for nid in self._food_neighbours(buckets, cx, cy):
@@ -491,6 +565,11 @@ class World:
         player_id = str(self._next_id)
         x, y = self._free_spot()
         player = Player(player_id, handler, x, y)
+        # Apply the handshake's view distance before anything is sent, so the
+        # welcome and its snapshot are already cut to this client's window.
+        requested = getattr(handler, "requested_view", None)
+        if requested is not None:
+            player.set_view_radius(requested)
         self.players[player_id] = player
         handler.player_id = player_id
         logging.info(f"Player {player_id} spawned (total: {len(self.players)})")
@@ -532,19 +611,25 @@ class World:
                 player.strategy.think(self, player)
             player.step(dt)
         self._spawn_timer(dt)
-        self._attract_food(dt)
-        self._merge_food()
-        self._handle_food()
+        # One walk of the food list feeds gravity, merging and pickup. At
+        # FOOD_MAX the walk itself is the expensive part, so it happens once.
+        mesh, mesh_cell, fine, fine_cell, shard = self._index_food()
+        shards = max(1, config.FOOD_GRAVITY_SHARDS)
+        self._attract_food(dt, mesh, mesh_cell, shard, dt * shards)
+        self._merge_food(fine, fine_cell, shard)
+        self._handle_food(fine, fine_cell)
         self._handle_collisions()
         self._broadcast_snapshot()
 
     def _spawn_timer(self, dt):
         """Drop new food on a fixed interval to keep the world stocked."""
         self._food_spawn_acc += dt
-        if self._food_spawn_acc >= config.FOOD_SPAWN_INTERVAL:
-            self._food_spawn_acc -= config.FOOD_SPAWN_INTERVAL
-            if len(self.foods) < config.FOOD_MAX:
-                self._spawn_food()
+        if self._food_spawn_acc < config.FOOD_SPAWN_INTERVAL:
+            return
+        self._food_spawn_acc -= config.FOOD_SPAWN_INTERVAL
+        room = config.FOOD_MAX - len(self.foods)
+        for _ in range(min(config.FOOD_SPAWN_BATCH, room)):
+            self._spawn_food()
 
     def _free_spot(self):
         margin = config.INITIAL_BODY_LENGTH
@@ -553,22 +638,18 @@ class World:
             random.uniform(margin, config.MAP_HEIGHT - margin),
         )
 
-    def _handle_food(self):
+    def _handle_food(self, buckets, cell):
         """Feed any head sitting on a pellet.
 
         This used to scan every pellet for every player, so it grew with the
         whole food list however far away it was. A head can only ever reach a
-        pellet within its own pickup range, so bucket the field and look at the
-        few cells that could contain one -- the same grid the gravity passes
-        use. Compares squared distances to skip a sqrt per pellet.
+        pellet within its own pickup range, so it walks the 3x3 block of the
+        shared fine grid instead -- whose cell is sized to cover the longest
+        reachable pickup, so a hit can never fall outside it. Compares squared
+        distances to skip a sqrt per pellet.
         """
         if not self.foods:
             return
-        # Cell size has to cover the largest reachable pickup distance, so that
-        # a hit can never sit outside the 3x3 block around the head.
-        reach = config.FOOD_MERGE_MAX_RADIUS + config.FOOD_PICKUP_PAD
-        cell = max(1.0, reach)
-        buckets = self._food_buckets(cell)
         for player in self.players.values():
             if not player.alive:
                 continue
@@ -686,29 +767,53 @@ class World:
         player.respawn(x, y)
         logging.info(f"Player {player_id} respawned")
 
-    def _food_list(self):
+    def _pellet_dict(self, fid, f):
+        pellet = {
+            protocol.FIELD_ID: fid,
+            protocol.FIELD_X: round(f["x"], 2),
+            protocol.FIELD_Y: round(f["y"], 2),
+            protocol.FIELD_FOOD_RADIUS: round(f["r"], 2),
+            protocol.FIELD_FOOD_DROPPED: f["dropped"],
+        }
+        # Omitted entirely for spawned food: food is the dominant term in
+        # snapshot size, so an unused key on every pellet is not free.
+        if f["owner"] is not None:
+            pellet[protocol.FIELD_FOOD_OWNER] = f["owner"]
+        return pellet
+
+    def _food_list(self, around=None, reach=None):
+        """Pellets for the wire, optionally only those near `around`.
+
+        With interest management on, a snapshot carries what a client can see
+        rather than the whole map, which is what lets the field be in the
+        thousands: payload tracks the viewport, not the world.
+        """
+        if around is None:
+            return [self._pellet_dict(fid, f) for fid, f in self.foods.items()]
+        px, py = around
+        if reach is None:
+            reach = config.INTEREST_RADIUS
+        minx = px - reach
+        maxx = px + reach
+        miny = py - reach
+        maxy = py + reach
         out = []
         for fid, f in self.foods.items():
-            pellet = {
-                protocol.FIELD_ID: fid,
-                protocol.FIELD_X: round(f["x"], 2),
-                protocol.FIELD_Y: round(f["y"], 2),
-                protocol.FIELD_FOOD_RADIUS: round(f["r"], 2),
-                protocol.FIELD_FOOD_DROPPED: f["dropped"],
-            }
-            # Omitted entirely for spawned food: food is the dominant term in
-            # snapshot size, so an unused key on every pellet is not free.
-            if f["owner"] is not None:
-                pellet[protocol.FIELD_FOOD_OWNER] = f["owner"]
-            out.append(pellet)
+            x = f["x"]
+            if x < minx or x > maxx:
+                continue
+            y = f["y"]
+            if y < miny or y > maxy:
+                continue
+            out.append(self._pellet_dict(fid, f))
         return out
 
-    def _snapshot(self):
+    def _snapshot(self, around=None, reach=None):
         return {
             protocol.FIELD_TYPE: protocol.TYPE_SNAPSHOT,
             protocol.FIELD_TICK: self.tick_count,
             protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
-            protocol.FIELD_FOOD: self._food_list(),
+            protocol.FIELD_FOOD: self._food_list(around, reach),
         }
 
     def _welcome(self, self_id, player):
@@ -730,21 +835,35 @@ class World:
             protocol.FIELD_MAX_GIRTH: config.MAX_GIRTH,
             protocol.FIELD_TURN_GIRTH_FALLOFF: config.TURN_GIRTH_FALLOFF,
             protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
-            protocol.FIELD_FOOD: self._food_list(),
+            # Same interest slice as a snapshot, so a joining client is not
+            # handed the whole map once and then quietly cut back to its
+            # neighbourhood on the next tick.
+            protocol.FIELD_FOOD: self._food_list(
+                around=(player.x, player.y),
+                reach=player.view_radius + config.INTEREST_MARGIN),
         }
 
     def _broadcast_snapshot(self):
-        # Serialise once. Handing write_message a dict makes Tornado JSON-encode
-        # it separately for every recipient, so the cost of encoding the whole
-        # world scaled with the number of players watching it -- the largest
-        # single phase of the tick at four connections. Everyone gets the same
-        # bytes, so encode them once and hand the string out.
-        listeners = [p.handler for p in self.players.values() if p.handler is not None]
-        if not listeners:
-            return
-        payload = json.dumps(self._snapshot())
-        for handler in listeners:
-            handler.write_message(payload)
+        """Send each connected player the slice of the world they can see.
+
+        Interest management costs us the encode-once trick: everyone used to
+        get identical bytes, so the whole world could be serialised a single
+        time. Now the food differs per viewer, so each snapshot is built and
+        encoded separately. That trade is heavily in our favour -- a viewer's
+        slice is a fraction of the field, so per-player encoding of a small
+        payload beats one encode of everything, and it stops snapshot cost
+        scaling with the size of the map at all.
+
+        Still handing write_message a pre-encoded string rather than a dict:
+        Tornado would otherwise encode it again on the way out.
+        """
+        for player in self.players.values():
+            handler = player.handler
+            if handler is None:
+                continue
+            reach = player.view_radius + config.INTEREST_MARGIN
+            snapshot = self._snapshot(around=(player.x, player.y), reach=reach)
+            handler.write_message(json.dumps(snapshot))
 
 
 class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
@@ -774,6 +893,11 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
             self.username = account.username
         else:
             self.username = _assign_guest_name(self.application.world.players.values())
+        # Read before spawning: spawn_player sends the welcome and a snapshot
+        # straight away, and those should already be sized to this window
+        # rather than going out at the full radius and narrowing a tick later.
+        self.requested_view = self.get_query_argument(
+            protocol.FIELD_VIEW, default=None)
         self.application.world.spawn_player(self)
 
     def on_message(self, message):
@@ -790,6 +914,9 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
         # Boost is an independent flag; it may arrive without a target.
         if protocol.FIELD_BOOST in data:
             player.boost = bool(data[protocol.FIELD_BOOST])
+        # Resizing the window changes how much the client can see.
+        if protocol.FIELD_VIEW in data:
+            player.set_view_radius(data[protocol.FIELD_VIEW])
         target = data.get(protocol.FIELD_TARGET)
         if isinstance(target, dict) and player.alive:
             player.set_target(float(target[protocol.FIELD_X]),

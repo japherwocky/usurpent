@@ -54,9 +54,29 @@
     return arr;
   }
 
+  // How far this window can see from the head, in world units: half of its
+  // longer axis. The server only sends food within this, so a small window
+  // costs a fraction of what a wide one does. Recomputed on resize.
+  function viewRadius() {
+    const w = canvas ? canvas.clientWidth : window.innerWidth;
+    const h = canvas ? canvas.clientHeight : window.innerHeight;
+    const s = Math.min(w, h) / VIEW_WORLD;
+    return Math.max(w, h) / s / 2;
+  }
+
+  function sendView() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'input', view: viewRadius() }));
+    }
+  }
+
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const q = name ? `?name=${encodeURIComponent(name)}` : '';
+    const params = new URLSearchParams();
+    if (name) params.set('name', name);
+    // Sent on the handshake so even the welcome payload is sized to us.
+    params.set('view', String(Math.round(viewRadius())));
+    const q = `?${params.toString()}`;
     ws = new WebSocket(`${proto}://${location.host}/ws${q}`);
     ws.onopen = () => (status = 'open');
     ws.onclose = () => (status = 'closed');
@@ -361,6 +381,7 @@
     }
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('resize', sendView);
     connect();
     lastFrame = performance.now();
     raf = requestAnimationFrame(loop);
@@ -370,6 +391,7 @@
     cancelAnimationFrame(raf);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
+    window.removeEventListener('resize', sendView);
     if (ws) ws.close();
   });
 </script>

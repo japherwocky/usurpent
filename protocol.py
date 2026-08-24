@@ -17,6 +17,13 @@ FIELD_TICK = "tick"
 FIELD_PLAYERS = "players"
 FIELD_TARGET = "target"  # steering direction vector (dx, dy) in world space
 FIELD_BOOST = "boost"    # bool: speed boost requested (held control)
+# How far the client can actually see, in world units from its head: half of
+# the larger viewport axis. Interest management sends food within this rather
+# than within a fixed radius sized for the widest window anyone might have, so
+# an ordinary window costs a fraction of an ultrawide. Sent on connect as a
+# query arg and again with input, so a resize takes effect. The server clamps
+# it -- a client asking for the whole map would just be told no.
+FIELD_VIEW = "view"
 FIELD_X = "x"
 FIELD_Y = "y"
 FIELD_MAP_WIDTH = "map_width"
