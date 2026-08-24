@@ -186,6 +186,51 @@ def _length_for_score(score):
             * _growth_fraction(score))
 
 
+class SpatialGrid:
+    """Uniform bucket grid: things go in by position, come out by neighbourhood.
+
+    The food field has used one of these since it went to thousands of
+    pellets, because the alternative is comparing everything to everything and
+    that is quadratic in a field that only ever grows. Serpent collision was
+    still doing exactly that -- every head against every point of every other
+    body -- so this is now shared rather than being a trick the food knows.
+
+    THE CELL MUST BE AT LEAST AS WIDE AS THE LONGEST REACH THAT QUERIES IT.
+    `near` returns a 3x3 block, which only guarantees one cell of coverage in
+    each direction, so an undersized cell silently drops candidates that were
+    in range: a head sits on a pellet and does not eat it, or passes through a
+    body without dying, with no error either way. Both cell sizes are derived
+    from the proximity rules themselves (see _fine_cell, _collision_cell) so
+    they cannot fall behind a retune.
+    """
+
+    __slots__ = ("cell", "buckets")
+
+    def __init__(self, cell):
+        self.cell = max(1.0, cell)
+        self.buckets = defaultdict(list)
+
+    def add(self, x, y, item):
+        cell = self.cell
+        self.buckets[(int(x // cell), int(y // cell))].append(item)
+
+    def near(self, x, y):
+        """Everything in the 3x3 block of cells around a point."""
+        cell = self.cell
+        cx = int(x // cell)
+        cy = int(y // cell)
+        buckets = self.buckets
+        for gx in (cx - 1, cx, cx + 1):
+            for gy in (cy - 1, cy, cy + 1):
+                bucket = buckets.get((gx, gy))
+                if bucket:
+                    yield from bucket
+
+    def counts(self):
+        """(cell_x, cell_y) -> how many things are in it. For the debug view."""
+        return {key: len(bucket) for key, bucket in self.buckets.items()}
+
+
 # --- Proximity rules -------------------------------------------------------
 #
 # Every "are these two things close enough" test in the sim is defined here,
@@ -543,15 +588,19 @@ class World:
         come out of a single pass:
 
         - `mesh`: per-cell mass aggregate for gravity (see _attract_food).
-        - `fine`: pellet ids bucketed for merge and pickup proximity tests.
+        - `fine`: a SpatialGrid of pellet ids, for merge and pickup.
         - `shard`: the ids whose turn it is on the gravity rota.
         """
         attract_cell = config.FOOD_ATTRACT_RADIUS
-        fine_cell = self._fine_cell()
+        fine = SpatialGrid(self._fine_cell())
+        fine_cell = fine.cell
         turn = self.tick_count % max(1, config.FOOD_GRAVITY_SHARDS)
         mesh = {}
-        fine = defaultdict(list)
         shard = []
+        # Inlined rather than calling fine.add per pellet: this walks the whole
+        # field every tick, and at eight thousand pellets a call each is the
+        # kind of money AGENTS.md is talking about. One walk, three structures.
+        buckets = fine.buckets
         for fid, food in self.foods.items():
             x = food["x"]
             y = food["y"]
@@ -564,10 +613,20 @@ class World:
                 agg[0] += v
                 agg[1] += x * v
                 agg[2] += y * v
-            fine[(int(x // fine_cell), int(y // fine_cell))].append(fid)
+            buckets[(int(x // fine_cell), int(y // fine_cell))].append(fid)
             if food["shard"] == turn:
                 shard.append(fid)
-        return mesh, attract_cell, fine, fine_cell, shard
+        return mesh, attract_cell, fine, shard
+
+    def _collision_cell(self):
+        """Cell size for the body-point grid.
+
+        The widest a collision reach can ever be: two serpents both at
+        MAX_GIRTH. Derived from the rule rather than stated, so a serpent that
+        can grow fatter grows the grid with it -- undersize this and a head
+        passes through a body with nothing to show for it.
+        """
+        return max(1.0, _collision_reach(config.MAX_GIRTH, config.MAX_GIRTH))
 
     def _index_players(self):
         """Bounding box per serpent, for interest culling.
@@ -580,9 +639,13 @@ class World:
         That walk pays for itself the moment it lets us skip even one to_dict.
         """
         boxes = {}
+        bodies = SpatialGrid(self._collision_cell())
+        cell = bodies.cell
+        buckets = bodies.buckets
         for pid, player in self.players.items():
             min_x = max_x = player.x
             min_y = max_y = player.y
+            alive = player.alive
             for px, py in player.points:
                 if px < min_x:
                     min_x = px
@@ -592,17 +655,15 @@ class World:
                     min_y = py
                 elif py > max_y:
                     max_y = py
+                # Only a live body is a hazard, so only a live body goes in
+                # the grid -- _handle_collisions then has nothing to filter.
+                # Inlined for the same reason as _index_food's: this is a walk
+                # of every point of every serpent, once a tick.
+                if alive:
+                    buckets[(int(px // cell), int(py // cell))].append((pid, px, py))
             girth = player.girth
             boxes[pid] = (min_x - girth, min_y - girth, max_x + girth, max_y + girth)
-        return boxes
-
-    def _food_neighbours(self, buckets, cx, cy):
-        """Pellet ids in the 3x3 block of cells around (cx, cy)."""
-        for gx in (cx - 1, cx, cx + 1):
-            for gy in (cy - 1, cy, cy + 1):
-                bucket = buckets.get((gx, gy))
-                if bucket:
-                    yield from bucket
+        return boxes, bodies
 
     def _attract_food(self, dt, mesh, cell, shard, step_dt):
         """Drift pellets toward the mass around them.
@@ -700,7 +761,7 @@ class World:
             food["x"] = min(float(config.MAP_WIDTH), max(0.0, nx))
             food["y"] = min(float(config.MAP_HEIGHT), max(0.0, ny))
 
-    def _merge_food(self, buckets, cell, shard):
+    def _merge_food(self, fine, shard):
         """Combine pellets that have drifted into contact.
 
         Value is conserved exactly (a blob is worth its crumbs), while the
@@ -720,8 +781,7 @@ class World:
             food = self.foods.get(fid)
             if food is None or food["r"] >= config.FOOD_MERGE_MAX_RADIUS:
                 continue
-            cx, cy = int(food["x"] // cell), int(food["y"] // cell)
-            for nid in self._food_neighbours(buckets, cx, cy):
+            for nid in fine.near(food["x"], food["y"]):
                 if nid == fid or nid in consumed:
                     continue
                 other = self.foods.get(nid)
@@ -814,13 +874,17 @@ class World:
         self._spawn_timer(dt)
         # One walk of the food list feeds gravity, merging and pickup. At
         # FOOD_MAX the walk itself is the expensive part, so it happens once.
-        mesh, mesh_cell, fine, fine_cell, shard = self._index_food()
+        mesh, mesh_cell, fine, shard = self._index_food()
         shards = max(1, config.FOOD_GRAVITY_SHARDS)
         self._attract_food(dt, mesh, mesh_cell, shard, dt * shards)
-        self._merge_food(fine, fine_cell, shard)
-        self._handle_food(fine, fine_cell)
-        self._handle_collisions()
-        self._broadcast_snapshot()
+        self._merge_food(fine, shard)
+        self._handle_food(fine)
+        # One walk of every body feeds both collision and interest culling,
+        # for the same reason the food gets one walk: at this many points the
+        # walk is the expensive part.
+        boxes, bodies = self._index_players()
+        self._handle_collisions(bodies)
+        self._broadcast_snapshot(boxes)
 
     def _spawn_timer(self, dt):
         """Drop new food on a fixed interval to keep the world stocked."""
@@ -839,7 +903,7 @@ class World:
             random.uniform(margin, config.MAP_HEIGHT - margin),
         )
 
-    def _handle_food(self, buckets, cell):
+    def _handle_food(self, fine):
         """Feed any head sitting on a pellet.
 
         This used to scan every pellet for every player, so it grew with the
@@ -855,8 +919,7 @@ class World:
             if not player.alive:
                 continue
             px, py = player.x, player.y
-            cx, cy = int(px // cell), int(py // cell)
-            for fid in list(self._food_neighbours(buckets, cx, cy)):
+            for fid in list(fine.near(px, py)):
                 food = self.foods.get(fid)
                 if food is None:
                     continue  # already eaten this tick
@@ -868,7 +931,16 @@ class World:
                     player.session_food += 1
                     player.girth = _girth_for_score(player.score)
 
-    def _handle_collisions(self):
+    def _handle_collisions(self, bodies):
+        """Kill any head that has reached another serpent's body.
+
+        Was every head against every point of every other body: quadratic in
+        players and linear in body length on top, measured at 12.9 ms a tick
+        with twenty serpents and heading straight through the 50 ms budget
+        somewhere around forty. A head can only reach what is next to it, so
+        it walks the 3x3 block of the body grid instead -- the same move the
+        food field made when it went to thousands of pellets.
+        """
         for player in self.players.values():
             if not player.alive:
                 continue
@@ -880,28 +952,30 @@ class World:
                 self._kill_player(player)
                 continue
             hx, hy = player.x, player.y
-            for other in self.players.values():
-                if other is player or not other.alive:
-                    continue
-                # Die if the head enters (attacker girth + defender girth) of
-                # any body point. Bigger snakes are both bulkier and easier to
-                # clip, so girth matters in both directions. Squared distances
-                # keep a sqrt out of the innermost loop in the tick.
-                reach = _collision_reach(player.girth, other.girth)
-                reach2 = reach * reach
-                # The squared compare is inlined here rather than going
-                # through _within, and only here: this is the innermost loop
-                # in the tick and the only one that runs per body POINT, so it
-                # is quadratic in players and linear in body length on top.
-                # A call per point measured 12% of the pass at twenty
-                # serpents. What is inlined is the arithmetic; the rule itself
-                # still comes from _collision_reach, which is the part that
-                # had a term missing everywhere else.
-                hit = any(
-                    (hx - px) * (hx - px) + (hy - py) * (hy - py) < reach2
-                    for (px, py) in other.points
-                )
-                if hit:
+            pid = player.id
+            girth = player.girth
+            # Die if the head enters (attacker girth + defender girth) of any
+            # body point. Bigger serpents are both bulkier and easier to clip,
+            # so girth matters in both directions. The reach varies with whose
+            # body a point belongs to, so it is looked up per owner and cached
+            # -- a body contributes many points and they all share a reach.
+            reach2_by_owner = {}
+            for owner, px, py in bodies.near(hx, hy):
+                if owner == pid:
+                    continue  # your own body is not a hazard
+                reach2 = reach2_by_owner.get(owner)
+                if reach2 is None:
+                    other = self.players.get(owner)
+                    if other is None:
+                        continue
+                    reach = _collision_reach(girth, other.girth)
+                    reach2 = reach * reach
+                    reach2_by_owner[owner] = reach2
+                # Squared compare inlined rather than going through _within:
+                # this is still the innermost loop in the tick, just a far
+                # shorter one now. The rule is _collision_reach above; what is
+                # inlined is the arithmetic.
+                if (hx - px) * (hx - px) + (hy - py) * (hy - py) < reach2:
                     self._kill_player(player)
                     break
 
@@ -1131,6 +1205,8 @@ class World:
             protocol.FIELD_MAX_GIRTH: config.MAX_GIRTH,
             protocol.FIELD_TURN_GIRTH_FALLOFF: config.TURN_GIRTH_FALLOFF,
             protocol.FIELD_RESPAWN_DELAY: config.RESPAWN_DELAY,
+            protocol.FIELD_FOOD_GRID_CELL: self._fine_cell(),
+            protocol.FIELD_BODY_GRID_CELL: self._collision_cell(),
             protocol.FIELD_FOOD_MIN_RADIUS: config.FOOD_BASE_RADIUS,
             protocol.FIELD_FOOD_MAX_RADIUS: config.FOOD_MERGE_MAX_RADIUS,
             protocol.FIELD_PLAYERS: [p.to_dict() for p in self.players.values()],
@@ -1142,8 +1218,12 @@ class World:
                 reach=player.view_radius + config.INTEREST_MARGIN),
         }
 
-    def _broadcast_snapshot(self):
+    def _broadcast_snapshot(self, boxes=None):
         """Send each connected player the slice of the world they can see.
+
+        `boxes` are the per-serpent bounds from _index_players; the tick has
+        them already, and callers outside it (spawn, disconnect) pass None and
+        get them built on the spot.
 
         Interest management costs us the encode-once trick: everyone used to
         get identical bytes, so the whole world could be serialised a single
@@ -1156,7 +1236,8 @@ class World:
         Still handing write_message a pre-encoded string rather than a dict:
         Tornado would otherwise encode it again on the way out.
         """
-        boxes = self._index_players()
+        if boxes is None:
+            boxes, _bodies = self._index_players()
         send_board = self._leaderboard_due()
         for player in self.players.values():
             handler = player.handler

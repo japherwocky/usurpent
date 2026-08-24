@@ -21,6 +21,7 @@
     { action: 'Steer', keys: ['mouse'] },
     { action: 'Boost', keys: ['click', 'shift'] },
     { action: 'Stats', keys: ['right-click', 'L'] },
+    { action: 'Grid', keys: ['G'] },
   ];
 
   // The guest name. Only ever used while signed out -- a signed-in player is

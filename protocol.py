@@ -58,6 +58,10 @@ FIELD_RESPAWN_DELAY = "respawn_delay"
 # and a blob that has merged its way to the cap. The client ramps pellet
 # colour across this, so it has to be told the real ends rather than baking
 # in a guess that silently drifts when the food constants are retuned.
+# Cell sizes of the two SpatialGrids, so the debug overlay draws the grid the
+# server is actually bucketing into rather than a plausible-looking guess.
+FIELD_FOOD_GRID_CELL = "food_grid_cell"
+FIELD_BODY_GRID_CELL = "body_grid_cell"
 FIELD_FOOD_MIN_RADIUS = "food_min_radius"
 FIELD_FOOD_MAX_RADIUS = "food_max_radius"
 

@@ -377,6 +377,9 @@ export class Game {
     // respawn request. The death card greys its button for the same interval;
     // the real value arrives in the welcome so the two cannot drift apart.
     this.respawnDelay = 1.5;
+    // Cell sizes of the server's two spatial grids, for the debug overlay.
+    this.foodGridCell = 0;
+    this.bodyGridCell = 0;
     // Ends of the pellet colour ramp, replaced from the welcome.
     this.foodMinRadius = 2;
     this.foodMaxRadius = 34;
@@ -408,6 +411,8 @@ export class Game {
     if (msg.segment_spacing_factor !== undefined) this.sim.segmentSpacingFactor = msg.segment_spacing_factor;
     if (msg.min_segment_spacing !== undefined) this.sim.minSegmentSpacing = msg.min_segment_spacing;
     if (msg.respawn_delay !== undefined) this.respawnDelay = msg.respawn_delay;
+    if (msg.food_grid_cell !== undefined) this.foodGridCell = msg.food_grid_cell;
+    if (msg.body_grid_cell !== undefined) this.bodyGridCell = msg.body_grid_cell;
     if (msg.food_min_radius !== undefined) this.foodMinRadius = msg.food_min_radius;
     if (msg.food_max_radius !== undefined) this.foodMaxRadius = msg.food_max_radius;
     this.players = {};

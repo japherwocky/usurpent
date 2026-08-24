@@ -31,10 +31,21 @@
   let showDebug = false;
   let debug = { fps: 0, tickHz: 0, snapMs: 0, players: 0, humans: 0, bots: 0,
                 visible: 0, food: 0, girth: 0, length: 0, boosting: false };
+  // Grid overlay: 0 off, 1 the food grid, 2 the body grid. Cycled with G.
+  // Both are the same SpatialGrid on the server with different cell sizes,
+  // which is easier to believe once you can see them on the field.
+  let gridMode = 0;
+  const GRID_MODES = [
+    null,
+    { label: 'food', color: '250, 204, 21' },
+    { label: 'bodies', color: '124, 198, 255' },
+  ];
   // Controls reminder, faded out once the player has had time to read it.
   let showHint = true;
   let hintTimer = 0;
 
+  // Surfaced in the grid badge; written by draw(), read by the markup.
+  let gridCell = 0;
   let mouseBoost = false;
   let keyBoost = false;
   let fps = 0;
@@ -171,13 +182,23 @@
     e.preventDefault();
     toggleDebug();
   }
-  // Keyboard sketch (full bindings later): Shift = boost, L = toggle stats.
+  // Shift = boost, L = stats, G = cycle the grid overlay.
+  //
+  // Matched on `code` OR `key`. `code` is the layout-independent one and the
+  // right default, but it is empty on synthesised events, and a letter
+  // shortcut has no reason to be picky about which of the two it got.
+  const isShift = (e) => e.code === 'ShiftLeft' || e.code === 'ShiftRight'
+    || e.key === 'Shift';
+  const isKey = (e, code, letter) => e.code === code
+    || (e.key || '').toLowerCase() === letter;
+
   function onKeyDown(e) {
-    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { keyBoost = true; updateBoost(); }
-    else if (e.code === 'KeyL') { toggleDebug(); }
+    if (isShift(e)) { keyBoost = true; updateBoost(); }
+    else if (isKey(e, 'KeyL', 'l')) { toggleDebug(); }
+    else if (isKey(e, 'KeyG', 'g')) { gridMode = (gridMode + 1) % GRID_MODES.length; }
   }
   function onKeyUp(e) {
-    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { keyBoost = false; updateBoost(); }
+    if (isShift(e)) { keyBoost = false; updateBoost(); }
   }
 
   // Built from the leaderboard message rather than from the snapshot: a
@@ -334,6 +355,69 @@
       ctx.arc(ccx, ccy, screenR, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
+    }
+
+    // Spatial grid overlay. Buckets what is on screen by the server's own cell
+    // size and shades each cell by how full it is, so the thing being drawn is
+    // the lookup the server actually does rather than a picture of one. The
+    // 3x3 block a query walks is the cell plus its neighbours, which is why
+    // the cell has to be at least as wide as the longest reach -- easier to
+    // see than to argue about.
+    const gridSpec = GRID_MODES[gridMode];
+    if (gridSpec) {
+      const cell = gridMode === 1 ? game.foodGridCell : game.bodyGridCell;
+      if (cell > 0) {
+        const counts = new Map();
+        let busiest = 0;
+        const tally = (wx, wy) => {
+          const key = Math.floor(wx / cell) + ':' + Math.floor(wy / cell);
+          const n = (counts.get(key) || 0) + 1;
+          counts.set(key, n);
+          if (n > busiest) busiest = n;
+        };
+        if (gridMode === 1) {
+          for (const f of game.foods) tally(f.x, f.y);
+        } else {
+          for (const pl of list) {
+            if (!pl.alive || !pl.points) continue;
+            for (const pt of pl.points) tally(pt[0], pt[1]);
+          }
+        }
+        const gx0 = Math.floor(cullMinX / cell);
+        const gx1 = Math.floor(cullMaxX / cell);
+        const gy0 = Math.floor(cullMinY / cell);
+        const gy1 = Math.floor(cullMaxY / cell);
+        ctx.save();
+        for (let gx = gx0; gx <= gx1; gx++) {
+          for (let gy = gy0; gy <= gy1; gy++) {
+            const n = counts.get(gx + ':' + gy);
+            if (!n) continue;
+            const [x0, y1] = toScreen(gx * cell, gy * cell);
+            const [x1, y0] = toScreen((gx + 1) * cell, (gy + 1) * cell);
+            ctx.fillStyle = `rgba(${gridSpec.color}, ${0.05 + 0.16 * (n / busiest)})`;
+            ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+          }
+        }
+        ctx.strokeStyle = `rgba(${gridSpec.color}, 0.22)`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let gx = gx0; gx <= gx1 + 1; gx++) {
+          const [sx] = toScreen(gx * cell, 0);
+          ctx.moveTo(sx, 0);
+          ctx.lineTo(sx, h);
+        }
+        for (let gy = gy0; gy <= gy1 + 1; gy++) {
+          const [, sy] = toScreen(0, gy * cell);
+          ctx.moveTo(0, sy);
+          ctx.lineTo(w, sy);
+        }
+        ctx.stroke();
+        ctx.restore();
+        // Guarded: draw() runs every frame, and an unconditional reactive
+        // write here would schedule a Svelte update sixty times a second to
+        // re-render a number that almost never changes.
+        if (gridCell !== cell) gridCell = cell;
+      }
     }
 
     // Cosmetic rotating particle field (world-space, scrolls with camera).
@@ -495,6 +579,13 @@
     </div>
   {/if}
 
+  {#if gridMode}
+    <div class="grid-badge">
+      <span class="sw" style="background:rgb({GRID_MODES[gridMode].color})"></span>
+      grid · {GRID_MODES[gridMode].label} · {Math.round(gridCell)}u
+    </div>
+  {/if}
+
   {#if board.length}
     <div class="board">
       <h2>Leaderboard</h2>
@@ -534,6 +625,7 @@
         <dt>snapshot</dt><dd>{debug.snapMs} ms</dd>
         <dt>players</dt><dd>{debug.humans}H / {debug.bots}B</dd>
         <dt>in view</dt><dd>{debug.visible}</dd>
+        <dt>grid f/b</dt><dd>{Math.round(game.foodGridCell)}/{Math.round(game.bodyGridCell)}u</dd>
         <dt>food</dt><dd>{debug.food}</dd>
         <dt>girth</dt><dd>{debug.girth}</dd>
         <dt>length</dt><dd>{debug.length}{debug.boosting ? ' · boost' : ''}</dd>
@@ -630,6 +722,29 @@
   }
   .conn.connecting { color: var(--warn); }
   .conn.closed { color: var(--bad); }
+
+  /* --- Grid badge ------------------------------------------------------- */
+  .grid-badge {
+    position: absolute;
+    top: 0.9rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(7, 11, 18, 0.85);
+    font-size: 0.7rem;
+    color: var(--ink-dim);
+    pointer-events: none;
+  }
+  .grid-badge .sw {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+  }
 
   /* --- Leaderboard ------------------------------------------------------ */
   .board {
