@@ -216,6 +216,12 @@ class Player:
         # When this life ended, as a monotonic timestamp. Only meaningful
         # while dead; RESPAWN_DELAY is measured from it.
         self.died_at = 0.0
+        # Queue turnover, so a viewer who has seen this body before can be sent
+        # only what changed. `epoch` bumps whenever the body is replaced rather
+        # than extended (respawn), which no delta can describe.
+        self.epoch = 0
+        self.appended = 0
+        self.dropped_points = 0
         self.respawn(x, y)
 
     def set_view_radius(self, raw):
@@ -235,6 +241,11 @@ class Player:
 
     def respawn(self, x, y):
         """Reset to a live snake at (x, y). Used on spawn and after death."""
+        # A new body, not a continuation of the old one: no delta can express
+        # it, so bump the epoch and every viewer is sent a fresh copy.
+        self.epoch += 1
+        self.appended = 0
+        self.dropped_points = 0
         self.x = x
         self.y = y
         self.heading = random.uniform(-math.pi, math.pi)
@@ -302,10 +313,12 @@ class Player:
             lx += (self.x - lx) * step
             ly += (self.y - ly) * step
             self.points.append((lx, ly))
+            self.appended += 1
             gap = math.hypot(self.x - lx, self.y - ly)
         max_points = max(1, round(self.length / spacing) + 1)
         while len(self.points) > max_points:
             self.points.pop(0)
+            self.dropped_points += 1
 
     def _turn_rate(self):
         """Max steering rate for this snake. Bigger girth -> wider turning
@@ -322,22 +335,14 @@ class Player:
         circles overlap into a connected tube at every size."""
         return max(config.MIN_SEGMENT_SPACING, self.girth * config.SEGMENT_SPACING_FACTOR)
 
-    def to_dict(self):
-        return {
+    def to_dict(self, body=True):
+        """Wire form. `body=False` omits the points, for callers that are
+        attaching a delta instead."""
+        out = {
             protocol.FIELD_ID: self.id,
             protocol.FIELD_X: round(self.x, 2),
             protocol.FIELD_Y: round(self.y, 2),
             protocol.FIELD_HEADING: round(self.heading, 4),
-            # A dead serpent ships no body. Its remains are already on the
-            # map as carcass pellets, and a corpse cannot kill anyone (see
-            # _handle_collisions), so drawing one is a lie about the hazard.
-            # It also used to be bounded by the 1.5s respawn timer; now that a
-            # human stays dead until they click, a ghost body would sit there
-            # for as long as they left the tab open.
-            protocol.FIELD_POINTS: (
-                [[round(px, 2), round(py, 2)] for px, py in self.points]
-                if self.alive else []
-            ),
             protocol.FIELD_ALIVE: self.alive,
             protocol.FIELD_SCORE: self.score,
             protocol.FIELD_GIRTH: round(self.girth, 2),
@@ -347,6 +352,15 @@ class Player:
             protocol.FIELD_STRATEGY: self.strategy.name if self.strategy else None,
             protocol.FIELD_BOOST: self.boost,
         }
+        if body:
+            # A dead serpent ships no body. Its remains are already on the map
+            # as carcass pellets, and a corpse cannot kill anyone (see
+            # _handle_collisions), so drawing one is a lie about the hazard.
+            out[protocol.FIELD_POINTS] = (
+                [[round(px, 2), round(py, 2)] for px, py in self.points]
+                if self.alive else []
+            )
+        return out
 
 
 class World:
@@ -938,19 +952,54 @@ class World:
             out.append(self._pellet_dict(fid, f))
         return out
 
-    def _snapshot(self, around=None, reach=None, visible=None):
+    def _player_dict(self, player, seen, fresh):
+        """One serpent as this viewer needs it: the whole body the first time
+        they see it, only what changed after that.
+
+        `seen` is what the viewer was last sent, keyed by serpent id; `fresh`
+        is rebuilt as we go and replaces it, so a serpent that drops out of
+        view forgets its history and is sent in full when it returns.
+        """
+        state = (player.epoch, player.appended, player.dropped_points)
+        fresh[player.id] = state
+        last = seen.get(player.id)
+        # A dead serpent has no body to describe and a new one cannot be
+        # reached by a delta, so both go out whole.
+        if last is None or last[0] != state[0] or not player.alive:
+            return player.to_dict()
+        added = state[1] - last[1]
+        dropped = state[2] - last[2]
+        if added < 0 or dropped < 0 or added > len(player.points):
+            return player.to_dict()
+        out = player.to_dict(body=False)
+        out[protocol.FIELD_POINTS_ADD] = [
+            [round(px, 2), round(py, 2)]
+            for px, py in player.points[len(player.points) - added:]
+        ]
+        out[protocol.FIELD_POINTS_DROP] = dropped
+        return out
+
+    def _snapshot(self, around=None, reach=None, visible=None, seen=None):
         """One viewer's slice of the world.
 
         `visible` is the set of serpent ids this viewer can see; None means
-        all of them (the welcome, which has no viewport to reason about yet).
+        all of them. `seen` is that viewer's body history, mutated in place;
+        None sends every body in full, which is what the welcome wants.
         """
         players = self.players.values()
         if visible is not None:
             players = [p for p in players if p.id in visible]
+        if seen is None:
+            wire = [p.to_dict() for p in players]
+        else:
+            fresh = {}
+            wire = [self._player_dict(p, seen, fresh) for p in players]
+            seen.clear()
+            seen.update(fresh)
         return {
             protocol.FIELD_TYPE: protocol.TYPE_SNAPSHOT,
             protocol.FIELD_TICK: self.tick_count,
-            protocol.FIELD_PLAYERS: [p.to_dict() for p in players],
+            protocol.FIELD_PLAYERS: wire,
             protocol.FIELD_FOOD: self._food_list(around, reach),
         }
 
@@ -1042,7 +1091,7 @@ class World:
                 if bx1 >= min_x and bx0 <= max_x and by1 >= min_y and by0 <= max_y:
                     visible.add(pid)
             snapshot = self._snapshot(around=(player.x, player.y), reach=reach,
-                                      visible=visible)
+                                      visible=visible, seen=handler.body_seen)
             handler.write_message(json.dumps(snapshot))
             if send_board:
                 handler.write_message(json.dumps(self._leaderboard(player)))
@@ -1065,6 +1114,9 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
 
     def open(self, *args, **kwargs):
         self.player_id = None
+        # What bodies this connection has already been sent, so snapshots can
+        # carry deltas. Keyed by serpent id -> (epoch, appended, dropped).
+        self.body_seen = {}
         # Bind to the logged-in account when a session cookie is present;
         # otherwise this is an anonymous guest (allowed to play). The cookie
         # is signed, so we trust it directly rather than re-authenticating.

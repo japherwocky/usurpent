@@ -73,6 +73,13 @@ FIELD_TOTAL_BOTS = "bots"      # client can see, or the stats panel would
 FIELD_ID = "id"
 FIELD_HEADING = "heading"
 FIELD_POINTS = "points"
+# A body arrives in full the first time a viewer sees a serpent, and after
+# that only as what changed: the points appended at the head since their last
+# snapshot, and how many fell off the tail. Interior points never move (see
+# the queue invariant in netcode.js), so re-sending them every tick was the
+# bulk of the payload describing nothing new.
+FIELD_POINTS_ADD = "add"
+FIELD_POINTS_DROP = "drop"
 FIELD_ALIVE = "alive"
 FIELD_SCORE = "score"
 FIELD_USERNAME = "username"

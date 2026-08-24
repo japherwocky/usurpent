@@ -434,10 +434,20 @@ export class Game {
     msg.players.forEach((p) => {
       const st = this.players[p.id] || makeState(p, this.selfId);
       st.prev = st.server; // old authoritative state = interp start
+      if (p.add !== undefined) {
+        // A delta: rebuild the body from the one we are already holding. The
+        // server states what changed, so there is nothing to infer -- this is
+        // the same {dropped, added} alignPoints used to reconstruct by
+        // scanning for float-equal points, only now it is told to us.
+        const base = st.prev ? st.prev.points : [];
+        const drop = p.drop || 0;
+        p.points = base.slice(drop).concat(p.add);
+        st.shift = { dropped: drop, added: p.add.length };
+      } else {
+        // A whole body: first sight of this serpent, or it was replaced.
+        st.shift = st.prev ? alignPoints(st.prev.points, p.points) : null;
+      }
       st.server = p; // new authoritative state = interp end
-      // How the point queue shifted between the two, worked out once here
-      // rather than on every frame of the tick.
-      st.shift = st.prev ? alignPoints(st.prev.points, p.points) : null;
       if (st.isSelf) reconcileLocal(st);
       this.players[p.id] = st;
     });
