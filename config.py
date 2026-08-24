@@ -139,6 +139,17 @@ INTEREST_MIN_RADIUS = _env_float("USURPENT_INTEREST_MIN_RADIUS", 400.0)
 # Added to whatever a client reports, covering the ground its head can cover
 # between snapshots plus a little slack so pellets are never seen arriving.
 INTEREST_MARGIN = _env_float("USURPENT_INTEREST_MARGIN", 120.0)
+# Cell size of the coarse interest grid that _food_list queries, instead of
+# scanning every pellet for every viewer each tick. Sized around the interest
+# radius -- NOT the fine merge/pickup grid (that is ~58u and would be far too
+# many buckets for a query this wide). A viewer's query block is a few of these
+# cells across, so the cell must be small enough that the block hugs the reach
+# box (a big cell forces a wide block that visits most of the map anyway) yet
+# large enough not to explode the bucket count. Measured across field sizes,
+# ~INTEREST_RADIUS/8 tracks the reach box tightly enough to win at both the
+# FOOD_MAX ceiling and well beyond, while staying far coarser than the 58u fine
+# grid.
+INTEREST_GRID_CELL = _env_float("USURPENT_INTEREST_GRID_CELL", INTEREST_RADIUS / 8.0)
 
 # Death: a slain serpent leaves a carcass of food pellets -- one per body
 # segment, sized from its girth. Dropped pellets render at lower opacity.

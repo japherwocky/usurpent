@@ -488,6 +488,9 @@ class World:
         self._food_spawn_acc = 0.0  # accumulator for timed food spawning
         self._callback = None
         self._bot_seq = 0
+        # Coarse spatial index of pellets for per-viewer interest queries
+        # (see _index_food / _food_list). Built each tick; None until the first.
+        self._interest_grid = None
         for _ in range(config.FOOD_COUNT):
             self._spawn_food()
         # Populate the arena with AI bots so humans have opponents from the
@@ -550,6 +553,7 @@ class World:
             if free >= wanted:
                 break
             if food["dropped"]:
+                food["dead"] = True
                 del self.foods[fid]
                 free += 1
         return max(0, min(wanted, free))
@@ -589,18 +593,24 @@ class World:
 
         - `mesh`: per-cell mass aggregate for gravity (see _attract_food).
         - `fine`: a SpatialGrid of pellet ids, for merge and pickup.
+        - `interest`: a coarse SpatialGrid of pellet ids, for the per-viewer
+          food query in _food_list (replaces a full scan of the field per
+          viewer per tick).
         - `shard`: the ids whose turn it is on the gravity rota.
         """
         attract_cell = config.FOOD_ATTRACT_RADIUS
         fine = SpatialGrid(self._fine_cell())
         fine_cell = fine.cell
+        interest = SpatialGrid(config.INTEREST_GRID_CELL)
+        interest_cell = interest.cell
         turn = self.tick_count % max(1, config.FOOD_GRAVITY_SHARDS)
         mesh = {}
         shard = []
         # Inlined rather than calling fine.add per pellet: this walks the whole
         # field every tick, and at eight thousand pellets a call each is the
-        # kind of money AGENTS.md is talking about. One walk, three structures.
+        # kind of money AGENTS.md is talking about. One walk, four structures.
         buckets = fine.buckets
+        ibuckets = interest.buckets
         for fid, food in self.foods.items():
             x = food["x"]
             y = food["y"]
@@ -614,8 +624,18 @@ class World:
                 agg[1] += x * v
                 agg[2] += y * v
             buckets[(int(x // fine_cell), int(y // fine_cell))].append(fid)
+            # Store the food dict, not just the id: _food_list can then build
+            # the wire dict straight from it and skip the self.foods lookup per
+            # pellet. Eaten/merged/evicted pellets are flagged "dead" at removal
+            # (see _handle_food / _merge_food / _make_room) so they are skipped
+            # even though their dict object still lives in this grid.
+            ibuckets[(int(x // interest_cell), int(y // interest_cell))].append((fid, food))
             if food["shard"] == turn:
                 shard.append(fid)
+        # Held on the world (not just returned) so _food_list can use it from
+        # out-of-tick snapshots too -- welcome, spawn, disconnect -- where the
+        # last tick's grid is still valid (pellets barely move between ticks).
+        self._interest_grid = interest
         return mesh, attract_cell, fine, shard
 
     def _collision_cell(self):
@@ -805,6 +825,7 @@ class World:
                 # merging cannot launder drops past the FOOD_MAX backstop.
                 food["dropped"] = food["dropped"] or other["dropped"]
                 consumed.add(nid)
+                other["dead"] = True
                 del self.foods[nid]
                 if food["r"] >= config.FOOD_MERGE_MAX_RADIUS:
                     break
@@ -925,6 +946,7 @@ class World:
                     continue  # already eaten this tick
                 if _within(px, py, food["x"], food["y"],
                            _pickup_reach(player.girth, food["r"])):
+                    food["dead"] = True
                     del self.foods[fid]
                     player.score += food["value"]
                     player.length = _length_for_score(player.score)
@@ -1090,12 +1112,46 @@ class World:
         With interest management on, a snapshot carries what a client can see
         rather than the whole map, which is what lets the field be in the
         thousands: payload tracks the viewport, not the world.
+
+        When a coarse interest grid is available (built each tick by
+        _index_food), the pellets are pulled from the block of grid cells
+        around the viewer instead of scanning the whole field -- the scan was
+        O(pellets x viewers) per tick. The block is a superset of everything
+        within `reach`; the axis-aligned test below trims it back to exactly
+        `reach`, so the result is byte-for-byte the same set the full scan
+        would have produced. One extra cell of slack absorbs the small gravity
+        drift between when the grid was built and when this query runs.
         """
         if around is None:
             return [self._pellet_dict(fid, f) for fid, f in self.foods.items()]
         px, py = around
         if reach is None:
             reach = config.INTEREST_RADIUS
+        grid = self._interest_grid
+        if grid is not None:
+            cell = grid.cell
+            half = int(math.ceil(reach / cell)) + 1
+            cx = int(px // cell)
+            cy = int(py // cell)
+            buckets = grid.buckets
+            out = []
+            for gx in range(cx - half, cx + half + 1):
+                for gy in range(cy - half, cy + half + 1):
+                    bucket = buckets.get((gx, gy))
+                    if not bucket:
+                        continue
+                    for fid, f in bucket:
+                        if f.get("dead"):
+                            continue  # eaten/merged/evicted since the grid built
+                        x = f["x"]
+                        if x < px - reach or x > px + reach:
+                            continue
+                        y = f["y"]
+                        if y < py - reach or y > py + reach:
+                            continue
+                        out.append(self._pellet_dict(fid, f))
+            return out
+        # No grid yet (before the first tick): fall back to the full scan.
         minx = px - reach
         maxx = px + reach
         miny = py - reach
