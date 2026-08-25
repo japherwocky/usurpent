@@ -445,6 +445,112 @@ export class Game {
     this.totalBots = msg.bots || 0;
   }
 
+  // Parse a binary TYPE_SNAPSHOT frame (see protocol.py BINARY_SNAPSHOT_*).
+  // Produces the same {type, tick, players, food} shape onSnapshot expects, so
+  // the rest of the client is unchanged. Ids come back as strings to match the
+  // JSON path: player ids feed colorFor (which indexes by string) and food ids
+  // are Map keys the JSON path also stored as strings.
+  parseBinarySnapshot(buf) {
+    const dv = new DataView(buf);
+    const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1),
+      dv.getUint8(2), dv.getUint8(3));
+    if (magic !== 'USNP') return null;
+    let p = 4;
+    const version = dv.getUint8(p++);
+    if (version !== 1) return null;
+    const tick = dv.getUint32(p); p += 4;
+    const pcount = dv.getUint16(p); p += 2;
+    const faddC = dv.getUint16(p); p += 2;
+    const fmovC = dv.getUint16(p); p += 2;
+    const fremC = dv.getUint16(p); p += 2;
+    const mapW = this.mapW, mapH = this.mapH;
+    const maxG = this.sim.maxGirth, maxR = this.foodMaxRadius;
+
+    const players = [];
+    for (let i = 0; i < pcount; i++) {
+      const id = String(dv.getUint32(p)); p += 4;
+      const qx = dv.getUint16(p); p += 2;
+      const qy = dv.getUint16(p); p += 2;
+      const qh = dv.getUint16(p); p += 2;
+      const alive = dv.getUint8(p) === 1; p += 1;
+      const score = dv.getUint32(p); p += 4;
+      const qg = dv.getUint16(p); p += 2;
+      const length = dv.getUint16(p); p += 2;
+      const isBot = dv.getUint8(p) === 1; p += 1;
+      const boost = dv.getUint8(p) === 1; p += 1;
+      const ulen = dv.getUint8(p); p += 1;
+      let uname = '';
+      for (let k = 0; k < ulen; k++) uname += String.fromCharCode(dv.getUint8(p++));
+      const slen = dv.getUint8(p); p += 1;
+      let strat = null;
+      if (slen > 0) {
+        strat = '';
+        for (let k = 0; k < slen; k++) strat += String.fromCharCode(dv.getUint8(p++));
+      }
+      const pl = {
+        id,
+        x: qx / 65535 * mapW,
+        y: qy / 65535 * mapH,
+        heading: qh / 65535 * (2 * Math.PI) - Math.PI,
+        alive, score,
+        girth: qg / 65535 * maxG,
+        length,
+        is_bot: isBot,
+        boost,
+        username: uname,
+        strategy: strat,
+      };
+      const kind = dv.getUint8(p++);
+      if (kind === 0) {
+        const ptc = dv.getUint16(p); p += 2;
+        const pts = [];
+        for (let j = 0; j < ptc; j++) {
+          const ax = dv.getUint16(p); p += 2;
+          const ay = dv.getUint16(p); p += 2;
+          pts.push([ax / 65535 * mapW, ay / 65535 * mapH]);
+        }
+        pl.points = pts;
+      } else {
+        const drop = dv.getUint16(p); p += 2;
+        const addc = dv.getUint16(p); p += 2;
+        const add = [];
+        for (let j = 0; j < addc; j++) {
+          const ax = dv.getUint16(p); p += 2;
+          const ay = dv.getUint16(p); p += 2;
+          add.push([ax / 65535 * mapW, ay / 65535 * mapH]);
+        }
+        pl.drop = drop;
+        pl.add = add;
+      }
+      players.push(pl);
+    }
+
+    const food = { fadd: [], fmov: [], frem: [] };
+    const readPellet = () => {
+      const id = String(dv.getUint32(p)); p += 4;
+      const qx = dv.getUint16(p); p += 2;
+      const qy = dv.getUint16(p); p += 2;
+      const qr = dv.getUint8(p); p += 1;
+      const flags = dv.getUint8(p); p += 1;
+      let owner = undefined;
+      if (flags & 2) { owner = String(dv.getUint32(p)); p += 4; }
+      const pel = {
+        id,
+        x: qx / 65535 * mapW,
+        y: qy / 65535 * mapH,
+        r: qr / 255 * maxR,
+        dropped: (flags & 1) === 1,
+      };
+      if (owner !== undefined) pel.own = owner;
+      return pel;
+    };
+    for (let i = 0; i < faddC; i++) food.fadd.push(readPellet());
+    for (let i = 0; i < fmovC; i++) food.fmov.push(readPellet());
+    for (let i = 0; i < fremC; i++) { food.frem.push(String(dv.getUint32(p))); p += 4; }
+
+    return { type: 'snapshot', tick, players, food };
+  }
+
   onSnapshot(msg, now) {
     if (this.lastSnapTime) {
       // Smooth the measured interval so alpha stays stable.

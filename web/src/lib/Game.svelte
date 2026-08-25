@@ -125,10 +125,18 @@
     params.set('view', String(Math.round(viewRadius())));
     const q = `?${params.toString()}`;
     ws = new WebSocket(`${proto}://${location.host}/ws${q}`);
+    // Snapshots arrive as binary frames; welcome/leaderboard stay JSON.
+    ws.binaryType = 'arraybuffer';
     ws.onopen = () => (status = 'open');
     ws.onclose = () => (status = 'closed');
     ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data);
+      let msg;
+      if (ev.data instanceof ArrayBuffer) {
+        msg = game.parseBinarySnapshot(ev.data);
+      } else {
+        msg = JSON.parse(ev.data);
+      }
+      if (!msg) return;
       if (msg.type === 'welcome') {
         game.onWelcome(msg);
         particles = mkParticles();

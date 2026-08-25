@@ -107,3 +107,57 @@ FIELD_STRATEGY = "strategy"
 FIELD_FOOD_ADD = "fadd"        # pellets newly in view: full dicts
 FIELD_FOOD_REMOVE = "frem"     # pellets that left view: ids only
 FIELD_FOOD_MOVE = "fmov"       # pellets still in view but changed: full dicts
+
+# --- Binary wire format for TYPE_SNAPSHOT (#239) ---
+# Snapshots are the 20 Hz message and the dominant bandwidth cost, so they are
+# sent as a packed binary frame instead of JSON. The client
+# (web/src/lib/netcode.js: parseBinarySnapshot) implements the same decoder.
+# There is intentionally NO JSON fallback: binary is always on for snapshots.
+#
+# All multi-byte integers are big-endian. Layout (offsets from frame start):
+#
+#   0   4   magic              b"USNP"
+#   4   1   version            (1)
+#   5   4   tick               u32
+#   9   2   player_count       u16
+#   11  2   food_add_count     u16
+#   13  2   food_move_count    u16
+#   15  2   food_remove_count  u16
+#   17  ..  players block
+#   ..  ..  food fadd block
+#   ..  ..  food fmov block
+#   ..  ..  food frem block (u32 ids)
+#
+# Per player (in the players block, in order):
+#   u32  id
+#   u16  x        quantized over [0, MAP_WIDTH]    (decode: q/65535*MAP_WIDTH)
+#   u16  y        quantized over [0, MAP_HEIGHT]
+#   u16  heading  quantized over [-pi, pi]         (decode: q/65535*2pi - pi)
+#   u8   alive    (0/1)
+#   u32  score
+#   u16  girth    quantized over [0, MAX_GIRTH]
+#   u16  length   (world units, integer)
+#   u8   is_bot   (0/1)
+#   u8   boost    (0/1)
+#   u8   username_len;  username_len bytes UTF-8
+#   u8   strategy_len;  strategy_len bytes UTF-8 (0 => null)
+#   u8   body_kind (0 = full body, 1 = delta)
+#       if full:
+#           u16 point_count
+#           point_count * (u16 x, u16 y)   quantized over the map like the head
+#       if delta:
+#           u16 drop
+#           u16 add_count
+#           add_count * (u16 x, u16 y)
+#
+# Per food pellet (fadd and fmov share this shape; each is a full dict):
+#   u32  id
+#   u16  x        quantized over [0, MAP_WIDTH]
+#   u16  y        quantized over [0, MAP_HEIGHT]
+#   u8   radius    quantized over [0, FOOD_MERGE_MAX_RADIUS]
+#   u8   flags     bit0 = dropped, bit1 = has_owner
+#   if has_owner: u32 owner
+#
+# food frem: food_remove_count * u32 id
+BINARY_SNAPSHOT_MAGIC = b"USNP"
+BINARY_SNAPSHOT_VERSION = 1

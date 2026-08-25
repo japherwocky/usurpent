@@ -11,6 +11,7 @@ import carcass
 import config
 import protocol
 import db
+import wire
 from bots import REGISTRY
 
 import os
@@ -1377,7 +1378,15 @@ class World:
             snapshot = self._snapshot(around=(player.x, player.y), reach=reach,
                                       visible=visible, seen=handler.body_seen,
                                       food_seen=handler.food_seen)
-            handler.write_message(json.dumps(snapshot))
+            # Snapshots are the 20 Hz message and the dominant bandwidth cost,
+            # so they go out as a packed binary frame (see wire.py / protocol.py
+            # BINARY_SNAPSHOT_*). There is no JSON fallback: the client always
+            # decodes binary snapshots. Welcome and leaderboard stay JSON -- they
+            # are rare (once per connection, and 2 Hz small text) and the client
+            # still parses them the same way.
+            handler.write_message(wire.encode_snapshot(
+                snapshot, config.MAP_WIDTH, config.MAP_HEIGHT,
+                config.MAX_GIRTH, config.FOOD_MERGE_MAX_RADIUS), binary=True)
             if send_board:
                 handler.write_message(json.dumps(self._leaderboard(player)))
 
