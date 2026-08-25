@@ -203,8 +203,8 @@ def smaller_than_json():
         snap, config.MAP_WIDTH, config.MAP_HEIGHT,
         config.MAX_GIRTH, config.FOOD_MERGE_MAX_RADIUS)
     if not (len(buf) < json_len):
-        return False, ("binary not smaller", len(buf), json_len)
-    return True, (len(buf), json_len)
+        return False, len(buf), json_len
+    return True, len(buf), json_len
 
 
 def main():
@@ -216,11 +216,10 @@ def main():
     if not ok:
         print("FAIL roundtrip:", info)
         return 1
-    ok, info = smaller_than_json()
+    ok, bin_len, json_len = smaller_than_json()
     if not ok:
-        print("FAIL smaller_than_json:", info)
+        print("FAIL smaller_than_json:", bin_len, json_len)
         return 1
-    bin_len, json_len = info
     print(f"OK: binary snapshot round-trips to the JSON content over ticks; "
           f"welcome is all-adds; frame {bin_len}B < JSON {json_len}B "
           f"({json_len / max(1, bin_len):.1f}x smaller)")
