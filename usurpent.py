@@ -15,6 +15,7 @@ import wire
 from bots import REGISTRY
 
 import os
+import asyncio
 import logging
 import math
 import random
@@ -1664,6 +1665,23 @@ class SpaStaticFileHandler(tornado.web.StaticFileHandler):
         return super().validate_absolute_path(root, absolute_path)
 
 
+def _install_fast_event_loop():
+    """Swap in uvloop when it is importable.
+
+    Must run before anything touches `IOLoop.current()` -- Tornado adopts
+    whatever asyncio loop already exists, and `App.__init__` creates one via
+    `World.start`. uvloop is POSIX-only, so the requirement is marked off on
+    Windows and dev boxes there quietly fall back to stock asyncio.
+    """
+    try:
+        import uvloop  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        logging.info("uvloop unavailable; using the stock asyncio event loop")
+        return
+    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    logging.info("uvloop event loop installed")
+
+
 def main():
     from tornado.options import define, options
     define("port", default=int(os.getenv('PORT', 55555)), help="run on the given port", type=int)
@@ -1688,6 +1706,8 @@ def main():
         logging.info("Tests requested but not implemented yet")
         print("Tests not implemented yet. Please create tests/ directory first.")
         return
+
+    _install_fast_event_loop()
 
     try:
         http_server = tornado.httpserver.HTTPServer(App(debug=options.debug), xheaders=True)

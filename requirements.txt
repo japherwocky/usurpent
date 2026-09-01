@@ -4,3 +4,5 @@ python-dotenv>=1.0.0
 pkanban>=0.3.0
 peewee>=3.17.0
 bcrypt>=4.0.0
+# Faster libuv-backed asyncio loop; POSIX only, skipped on Windows dev boxes.
+uvloop>=0.21.0; sys_platform != "win32"
