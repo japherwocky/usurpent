@@ -39,7 +39,7 @@ direction (mouse offset from screen center), not a world target.
   set `pythonPath` there; it is not a valid pyright setting.
 - `requirements.txt` — Runtime deps only.
 - `env/` — Python 3.12.4 virtualenv. Run it directly:
-  `./env/Scripts/python.exe`, `./env/Scripts/pip.exe`, `./env/Scripts/kanban.exe`.
+  `./env/Scripts/python.exe`, `./env/Scripts/pip.exe`, `./env/Scripts/pkanban.exe`.
 
 ## Frontend (web/)
 
@@ -95,19 +95,19 @@ token is used.
 The board is the live backlog. `PLAN.md` was deleted on purpose — plan here,
 not in a markdown file.
 
-- Tool: `pkanban` (pip package; the CLI command is `kanban`, not `pkanban`).
+- Tool: `pkanban` (pip package; CLI command is `pkanban`).
   Already installed in the venv.
 - Host: `https://kanban.pearachute.com`. Auth is already set up in
   `~/.kanban.yaml`; the CLI works without re-login.
 - Board: **"usurpent", ID 10**.
 - Columns: **Backlog (29), To Do (30), In Progress (31), Done (32)**.
 
-Useful commands (run from the venv, e.g. `./env/Scripts/kanban.exe ...`):
+Useful commands (run from the venv, e.g. `./env/Scripts/pkanban.exe ...`):
 
-- `kanban board get 10` — view the whole board.
-- `kanban card create --column 29 --title "..." --body "..."` — add a card.
-- `kanban card move <id> --column <col>` — move a card between columns.
-- `kanban card move <id> --position <n>` — reorder within a column.
+- `pkanban board get 10` — view the whole board.
+- `pkanban card create --column 29 --title "..." --body "..."` — add a card.
+- `pkanban card move <id> --column <col>` — move a card between columns.
+- `pkanban card move <id> --position <n>` — reorder within a column.
 
 Ordering note: `board get` lists cards by ID, but the web UI sorts by
 `position` (new cards default to 0). Use `card move <id> --position <n>` to
