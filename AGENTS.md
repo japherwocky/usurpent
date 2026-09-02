@@ -176,3 +176,7 @@ with four players connected runs around 17 ms median and peaks near 30 ms.
 - Commit to `main` directly. No branches, no PRs, no CI — it is just us.
 - Keep gameplay/behavior constants in `config.py` with a `USURPENT_` env override.
 - Run the type checker with the venv's pyright; it should report 0 errors.
+- Run the tests with `./env/Scripts/python.exe usurpent.py --runtests=true`;
+  they should all pass. It runs every `tests/test_*.py` in its own process.
+  Tests are plain scripts with a `main()` returning 0 or 1 — no pytest. Write
+  new ones the same way and they are picked up automatically.
