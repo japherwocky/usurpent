@@ -16,11 +16,14 @@ from bots import REGISTRY
 
 import os
 import asyncio
+import glob
 import logging
 import math
 import random
 import json
 import re
+import subprocess
+import sys
 import time
 from collections import defaultdict
 
@@ -1682,6 +1685,39 @@ def _install_fast_event_loop():
     logging.info("uvloop event loop installed")
 
 
+def _run_tests():
+    """Run every tests/test_*.py and report which passed. Returns an exit code.
+
+    Each test is a standalone script whose `main()` returns 0 or 1, so they run
+    as subprocesses rather than imports: several of them set environment
+    variables and monkeypatch module state at import time, and one process per
+    test keeps that out of the others' way. No pytest dependency.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    paths = sorted(glob.glob(os.path.join(here, "tests", "test_*.py")))
+    if not paths:
+        print("No tests found in tests/.")
+        return 1
+
+    failed = []
+    for path in paths:
+        name = os.path.basename(path)
+        # Flush before handing the terminal to the child: our stdout is block
+        # buffered when piped, the child's is not, and unflushed headers would
+        # otherwise all land after the output they label.
+        print(f"--- {name}", flush=True)
+        result = subprocess.run([sys.executable, path], cwd=here)
+        if result.returncode != 0:
+            failed.append(name)
+
+    print()
+    if failed:
+        print(f"FAILED {len(failed)}/{len(paths)}: {', '.join(failed)}")
+        return 1
+    print(f"PASSED {len(paths)}/{len(paths)}")
+    return 0
+
+
 def main():
     from tornado.options import define, options
     define("port", default=int(os.getenv('PORT', 55555)), help="run on the given port", type=int)
@@ -1692,20 +1728,17 @@ def main():
     
     # Enable Tornado's pretty logging
     enable_pretty_logging()
-    
+
+    # Tests before anything announces a server; --runtests never starts one.
+    if options.runtests:
+        sys.exit(_run_tests())
+
     logging.info("Starting USURPENT server")
-    
+
     # Check if .env file exists
     if not os.path.exists('.env'):
         logging.warning("No .env file found. Using default configuration.")
         logging.info("Copy .env.example to .env and configure for production use.")
-
-    if options.runtests:
-        # put tests in the tests folder
-        # Tests not implemented yet
-        logging.info("Tests requested but not implemented yet")
-        print("Tests not implemented yet. Please create tests/ directory first.")
-        return
 
     _install_fast_event_loop()
 
