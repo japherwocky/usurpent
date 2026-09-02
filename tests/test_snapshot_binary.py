@@ -38,14 +38,17 @@ def approx(a, b, tol):
 def ang_eq(a, b, tol):
     # Headings are periodic; the binary path wraps into [-pi, pi] while JSON may
     # send an unwrapped angle, so compare modulo 2pi.
-    def wrap(x):
-        x = math.fmod(x, 2.0 * math.pi)
-        if x > math.pi:
-            x -= 2.0 * math.pi
-        elif x <= -math.pi:
-            x += 2.0 * math.pi
-        return x
-    return abs(wrap(a) - wrap(b)) <= tol
+    #
+    # Wrap the DIFFERENCE, not each side. Wrapping each side first and then
+    # subtracting reports two headings that straddle the +/-pi seam -- a
+    # serpent pointing left, which happens constantly -- as a full 2pi apart
+    # when they are actually a quantization step apart.
+    d = math.fmod(a - b, 2.0 * math.pi)
+    if d > math.pi:
+        d -= 2.0 * math.pi
+    elif d <= -math.pi:
+        d += 2.0 * math.pi
+    return abs(d) <= tol
 
 
 def players_equal(json_ps, bin_ps):
