@@ -18,10 +18,16 @@ TYPE_LEADERBOARD = "leaderboard"
 # (an unknown mode in the handshake, say). The close frame carries a code too;
 # this is the human-readable twin.
 TYPE_ERROR = "error"
+# Sent to a player at the moment their serpent dies, telling them why. The
+# snapshot's alive flag is how the client learns death at all; this is the
+# human-readable twin, and it rides JSON because it is a one-off event, not
+# per-tick state that belongs in the binary frame.
+TYPE_DEATH = "died"
 
 # Common field names.
 FIELD_TYPE = "type"
 FIELD_ERROR = "error"   # payload of TYPE_ERROR: why the connection was refused
+FIELD_CAUSE = "cause"   # payload of TYPE_DEATH: wall | snake | self
 # Which mode a world plays. Sent in the welcome; the handshake picks one with
 # the ?mode= query arg (default: classic).
 FIELD_MODE = "mode"

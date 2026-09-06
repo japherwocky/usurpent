@@ -25,14 +25,27 @@ def _nearest_food(world, bot):
     return best
 
 
-def _avoid_bodies(world, bot, radius):
+def _avoid_bodies(world, bot, radius, include_self=False):
     """Repulsion vector (ax, ay) pushing the bot away from nearby body points
-    of other live snakes. Sampled every 3rd point to stay cheap."""
+    of other live snakes. Sampled every 3rd point to stay cheap.
+
+    With `include_self` (hardcore: your own body is a hazard), the bot's own
+    body repels it too -- minus the neck, which the collision rule's grace arc
+    forgives and which would otherwise sit inside the sense radius at every
+    size, fighting the steering every tick.
+    """
     ax = ay = 0.0
     for other in world.players.values():
-        if other is bot or not other.alive:
+        if other is bot and not include_self:
             continue
-        for px, py in other.points[::3]:
+        if not other.alive:
+            continue
+        points = other.points
+        if other is bot:
+            grace = world.self_grace_segments(bot.girth)
+            if grace:
+                points = points[:len(points) - grace]
+        for px, py in points[::3]:
             dx = bot.x - px
             dy = bot.y - py
             d2 = dx * dx + dy * dy
@@ -85,7 +98,8 @@ class FoodSeekerStrategy(BotStrategy):
                 dy = food["y"] - bot.y
             else:
                 dx, dy = _to_center(bot)
-        ax, ay = _avoid_bodies(world, bot, config.BOT_AVOID_RADIUS)
+        ax, ay = _avoid_bodies(world, bot, config.BOT_AVOID_RADIUS,
+                               include_self=world.mode.self_collision)
         bot.set_target(dx + ax * config.BOT_AVOID_WEIGHT,
                        dy + ay * config.BOT_AVOID_WEIGHT)
 
@@ -108,7 +122,8 @@ class WandererStrategy(BotStrategy):
             self._heading += random.uniform(-0.3, 0.3)
             dx = math.cos(self._heading)
             dy = math.sin(self._heading)
-        ax, ay = _avoid_bodies(world, bot, config.BOT_AVOID_RADIUS)
+        ax, ay = _avoid_bodies(world, bot, config.BOT_AVOID_RADIUS,
+                               include_self=world.mode.self_collision)
         bot.set_target(dx + ax * config.BOT_AVOID_WEIGHT,
                        dy + ay * config.BOT_AVOID_WEIGHT)
 

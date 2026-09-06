@@ -232,7 +232,15 @@ BOT_AVOID_RADIUS = _env_float("USURPENT_BOT_AVOID_RADIUS", 120.0)  # body-avoida
 BOT_AVOID_WEIGHT = _env_float("USURPENT_BOT_AVOID_WEIGHT", 4000.0) # how strongly bodies push bots away
 
 # Collisions. A head dies if it enters (attacker girth + defender girth) of any
-# body point of another snake. Self-collision is intentionally off.
+# body point of another snake. Self-collision is off in classic and on in
+# hardcore (modes.py), where the neck needs a pardon: segments space at
+# ~girth/3 while the reach is 2*girth, so the body just behind the head is
+# inside the collision radius by construction and every turn would suicide.
+# The rule forgives an arc of body measured back from the head -- this many
+# girths of it. At 3.0 that is ~9 segments at every size (both scale with
+# girth): enough that a tightest-possible turn cannot kill, small enough that
+# deliberately looping back through your own body still does.
+SELF_COLLISION_GRACE_GIRTHS = _env_float("USURPENT_SELF_COLLISION_GRACE_GIRTHS", 3.0)
 
 # Lifecycle.
 RESPAWN_DELAY = _env_float("USURPENT_RESPAWN_DELAY", 1.5)      # seconds

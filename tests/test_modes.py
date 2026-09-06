@@ -108,10 +108,13 @@ async def run():
     conns = []
     try:
         # 1. /api/modes serves the registry with id, name and description.
+        # The shipped modes are whatever REGISTRY holds by now (classic,
+        # hardcore, ...); the test only demands the injected stub and classic
+        # are both there, so adding a mode never breaks this test.
         resp = await AsyncHTTPClient().fetch(f"http://127.0.0.1:{port}/api/modes")
         listing = json.loads(resp.body)[protocol.FIELD_MODES]
         by_id = {m["id"]: m for m in listing}
-        if set(by_id) != {"classic", "stub"}:
+        if not {"classic", "stub"} <= set(by_id):
             fail("/api/modes", f"served {sorted(by_id)}, expected classic+stub")
         for m in listing:
             if not m.get("name") or not m.get("description"):

@@ -22,7 +22,19 @@
   let alive = true;
   let deathAt = 0;
   let canRespawn = false;
-  let respawnBtn;
+  let respawnBtn = null;
+  // Why this life ended, from the server's `died` message: wall | snake |
+  // self. The card's headline says it; cleared on the way back to life.
+  let deathCause = null;
+
+  // The card's headline. A cause the client does not recognise falls through
+  // to the plain version, so a new server-side cause degrades gracefully.
+  const DEATH_HEADLINES = {
+    self: 'You crossed your own tail',
+    wall: 'You hit the wall',
+    snake: 'You were cut off',
+  };
+  $: deathHeadline = DEATH_HEADLINES[deathCause] || 'You died';
 
   // Leaderboard, rebuilt on a timer rather than every frame -- it is a sort
   // over every player on the map, and nobody can read it at 60 Hz anyway.
@@ -163,6 +175,10 @@
       } else if (msg.type === 'error') {
         // Refused at the door (unknown mode, say). The badge carries why.
         status = msg.error || 'refused';
+      } else if (msg.type === 'died') {
+        // Why this life ended. The alive flag flips in the snapshot that
+        // follows; the card reads this when it appears.
+        deathCause = msg.cause || null;
       }
     };
   }
@@ -284,6 +300,9 @@
         deathAt = now;
         canRespawn = false;
         showHint = false;
+      } else {
+        // Back among the living: the old cause has said its piece.
+        deathCause = null;
       }
     }
     if (!alive && !canRespawn && now - deathAt >= game.respawnDelay * 1000) {
@@ -677,7 +696,7 @@
   {#if !alive}
     <div class="death">
       <div class="death-card">
-        <h2>You died</h2>
+        <h2>{deathHeadline}</h2>
         <div class="final">
           <span class="label">Score</span>
           <span class="value">{selfScore.toLocaleString()}</span>

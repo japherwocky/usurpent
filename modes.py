@@ -72,8 +72,19 @@ class ClassicMode(GameMode):
     description = "The straight slither clone. Eat, grow, and cut other serpents off."
 
 
+class HardcoreMode(GameMode):
+    """Classic rules plus a memory: your own tail is as lethal as anyone
+    else's. Every turn is a commitment, and a long serpent has to plan its
+    path or lie down in it."""
+
+    id = "hardcore"
+    name = "Hardcore"
+    description = "Your own tail kills you. Every turn is a commitment."
+    self_collision = True
+
+
 # Order is the order /api/modes serves them in.
-REGISTRY: "list[type[GameMode]]" = [ClassicMode]
+REGISTRY: "list[type[GameMode]]" = [ClassicMode, HardcoreMode]
 
 
 def get_mode(mode_id):

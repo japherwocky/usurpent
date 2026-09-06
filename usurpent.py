@@ -277,6 +277,23 @@ def _collision_reach(girth_a, girth_b):
     return girth_a + girth_b
 
 
+def _self_grace_segments(girth):
+    """How many of a serpent's own body points self-collision forgives.
+
+    These are the neck: the points just behind the head, which sit inside the
+    collision radius at every size (segments space at ~girth/3, the reach is
+    2*girth) and would kill every turn if counted. The grace is an arc length
+    (SELF_COLLISION_GRACE_GIRTHS girths of body), converted to a point count
+    with the same spacing formula the body is laid down with, so it covers the
+    same geometry at every girth. Points append at the head, so the forgiven
+    ones are the LAST K in the list.
+    """
+    spacing = max(config.MIN_SEGMENT_SPACING,
+                  girth * config.SEGMENT_SPACING_FACTOR)
+    grace = girth * config.SELF_COLLISION_GRACE_GIRTHS
+    return int(grace / spacing) + 1
+
+
 def _head_reach(girth):
     """A head's effective radius for eating.
 
@@ -334,6 +351,9 @@ class Player:
         # When this life ended, as a monotonic timestamp. Only meaningful
         # while dead; RESPAWN_DELAY is measured from it.
         self.died_at = 0.0
+        # Why this life ended: "wall", "snake" or "self". Set at death, sent
+        # to the dying client as a `died` message, cleared on respawn.
+        self.death_cause = None
         # Queue turnover, so a viewer who has seen this body before can be sent
         # only what changed. `epoch` bumps whenever the body is replaced rather
         # than extended (respawn), which no delta can describe.
@@ -373,6 +393,7 @@ class Player:
         self.alive = True
         self.score = 0
         self.boost = False
+        self.death_cause = None
         # New life: not yet persisted. session_food is intentionally kept so
         # food from prior lives in this session still counts.
         self.life_persisted = False
@@ -533,6 +554,12 @@ class World:
     def is_ticking(self):
         return self._callback is not None and self._callback.is_running()
 
+    def self_grace_segments(self, girth):
+        """Own-body points self-collision forgives, counted back from the
+        head. Public because the bot brains need the same arc: without it a
+        bot's avoidance sense would repel itself off its own neck."""
+        return _self_grace_segments(girth)
+
     def _make_food(self, x, y, radius, value, dropped, owner=None):
         """Store one pellet. Foods are dicts so per-pellet radius/value/dropped
         can vary (spawned vs. carcass).
@@ -689,7 +716,11 @@ class World:
             min_x = max_x = player.x
             min_y = max_y = player.y
             alive = player.alive
-            for px, py in player.points:
+            # The point's index rides along with its position: hardcore's
+            # self-collision has to tell a neck point (forgiven) from a loop
+            # the serpent laid down three turns ago (lethal), and the index
+            # is the only thing that knows. Same walk, one tuple element more.
+            for idx, (px, py) in enumerate(player.points):
                 if px < min_x:
                     min_x = px
                 elif px > max_x:
@@ -703,7 +734,8 @@ class World:
                 # Inlined for the same reason as _index_food's: this is a walk
                 # of every point of every serpent, once a tick.
                 if alive:
-                    buckets[(int(px // cell), int(py // cell))].append((pid, px, py))
+                    buckets[(int(px // cell), int(py // cell))].append(
+                        (pid, px, py, idx))
             girth = player.girth
             boxes[pid] = (min_x - girth, min_y - girth, max_x + girth, max_y + girth)
         return boxes, bodies
@@ -991,7 +1023,8 @@ class World:
                     player.girth = _girth_for_score(player.score)
 
     def _handle_collisions(self, bodies):
-        """Kill any head that has reached another serpent's body.
+        """Kill any head that has reached another serpent's body -- or, in
+        hardcore, its own.
 
         Was every head against every point of every other body: quadratic in
         players and linear in body length on top, measured at 12.9 ms a tick
@@ -1000,6 +1033,7 @@ class World:
         it walks the 3x3 block of the body grid instead -- the same move the
         food field made when it went to thousands of pellets.
         """
+        self_collision = self.mode.self_collision
         for player in self.players.values():
             if not player.alive:
                 continue
@@ -1008,7 +1042,7 @@ class World:
             # so reaching the bound means it is exactly at the wall.
             if (player.x <= 0.0 or player.x >= config.MAP_WIDTH or
                     player.y <= 0.0 or player.y >= config.MAP_HEIGHT):
-                self._kill_player(player)
+                self._kill_player(player, "wall")
                 continue
             hx, hy = player.x, player.y
             pid = player.id
@@ -1019,29 +1053,51 @@ class World:
             # body a point belongs to, so it is looked up per owner and cached
             # -- a body contributes many points and they all share a reach.
             reach2_by_owner = {}
-            for owner, px, py in bodies.near(hx, hy):
+            # Hardcore only: the neck is inside the collision radius at every
+            # size, so the last K points (points append at the head, so the
+            # neck sits at the end of the list) are forgiven. A loop the
+            # serpent laid down earlier has a low index and stays lethal.
+            neck_start = (len(player.points) - _self_grace_segments(girth)
+                          if self_collision else 0)
+            for owner, px, py, idx in bodies.near(hx, hy):
                 if owner == pid:
-                    continue  # your own body is not a hazard
-                reach2 = reach2_by_owner.get(owner)
-                if reach2 is None:
-                    other = self.players.get(owner)
-                    if other is None:
-                        continue
-                    reach = _collision_reach(girth, other.girth)
-                    reach2 = reach * reach
-                    reach2_by_owner[owner] = reach2
+                    if not self_collision or idx >= neck_start:
+                        continue  # your own body is not a hazard (classic)
+                    reach2 = reach2_by_owner.get(pid)
+                    if reach2 is None:
+                        reach = _collision_reach(girth, girth)
+                        reach2 = reach * reach
+                        reach2_by_owner[pid] = reach2
+                else:
+                    reach2 = reach2_by_owner.get(owner)
+                    if reach2 is None:
+                        other = self.players.get(owner)
+                        if other is None:
+                            continue
+                        reach = _collision_reach(girth, other.girth)
+                        reach2 = reach * reach
+                        reach2_by_owner[owner] = reach2
                 # Squared compare inlined rather than going through _within:
                 # this is still the innermost loop in the tick, just a far
                 # shorter one now. The rule is _collision_reach above; what is
                 # inlined is the arithmetic.
                 if (hx - px) * (hx - px) + (hy - py) * (hy - py) < reach2:
-                    self._kill_player(player)
+                    self._kill_player(player,
+                                      "self" if owner == pid else "snake")
                     break
 
-    def _kill_player(self, player):
+    def _kill_player(self, player, cause="snake"):
         player.alive = False
         player.died_at = time.monotonic()
-        logging.info(f"Player died (score {player.score})")
+        player.death_cause = cause
+        logging.info(f"Player died ({cause}, score {player.score})")
+        # Tell the dying client why, so the death card can say more than
+        # "you died". Bots have no handler; nobody else needs this.
+        if player.handler is not None:
+            player.handler.write_message({
+                protocol.FIELD_TYPE: protocol.TYPE_DEATH,
+                protocol.FIELD_CAUSE: cause,
+            })
         # Leave a carcass of food where the body fell, then record stats.
         self._drop_carcass(player)
         self._persist_life(player)
