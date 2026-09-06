@@ -22,6 +22,14 @@ export async function apiGet(path) {
   return res.json();
 }
 
+// The joinable game modes, as [{id, name, description}]. The lobby renders
+// its mode buttons from this rather than hardcoding a list, so a mode added
+// server-side appears without a client change.
+export async function fetchModes() {
+  const data = await apiGet('/api/modes');
+  return data.modes || [];
+}
+
 export async function apiPost(path, body) {
   const xsrf = getCookie('_xsrf');
   const res = await fetch(path, {

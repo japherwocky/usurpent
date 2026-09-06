@@ -1,9 +1,15 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
+  import { createEventDispatcher } from 'svelte';
   import { Game, foodColor, serpentColor, PALETTE, STRATEGY_COLORS } from './netcode.js';
+
+  const dispatch = createEventDispatcher();
 
   // Display name chosen in the lobby; sent to the server on connect.
   export let name = '';
+  // The mode picked in the lobby, as {id, name} from /api/modes. The id goes
+  // on the WS handshake (?mode=); the name labels the HUD.
+  export let mode = { id: 'classic', name: 'Classic' };
 
   let canvas;
   let status = 'connecting';
@@ -121,6 +127,9 @@
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const params = new URLSearchParams();
     if (name) params.set('name', name);
+    // Which world to join. The server refuses an unknown id with an error
+    // frame and a close, which the status badge surfaces.
+    if (mode && mode.id) params.set('mode', mode.id);
     // Sent on the handshake so even the welcome payload is sized to us.
     params.set('view', String(Math.round(viewRadius())));
     const q = `?${params.toString()}`;
@@ -128,7 +137,11 @@
     // Snapshots arrive as binary frames; welcome/leaderboard stay JSON.
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => (status = 'open');
-    ws.onclose = () => (status = 'closed');
+    // An error frame (refused at the door) sets `status` to its text; the
+    // close that follows must not overwrite it with a bland "closed".
+    ws.onclose = () => {
+      if (status === 'open' || status === 'connecting') status = 'closed';
+    };
     ws.onmessage = (ev) => {
       let msg;
       if (ev.data instanceof ArrayBuffer) {
@@ -147,6 +160,9 @@
       } else if (msg.type === 'leaderboard') {
         game.onLeaderboard(msg);
         updateBoard();
+      } else if (msg.type === 'error') {
+        // Refused at the door (unknown mode, say). The badge carries why.
+        status = msg.error || 'refused';
       }
     };
   }
@@ -571,19 +587,24 @@
   <canvas bind:this={canvas} on:mousemove={onMouseMove}></canvas>
 
   <!-- Score. The one number the player is actually playing for, so it gets
-       the display face and the size to match. -->
+       the display face and the size to match. The chip beside it names the
+       world you are in. -->
   <div class="hud-score">
     <span class="label">Score</span>
     {#key selfScore}
       <span class="value">{selfScore.toLocaleString()}</span>
     {/key}
+    {#if mode && mode.name}
+      <span class="mode-chip">{mode.name}</span>
+    {/if}
   </div>
 
   <!-- Connection state only surfaces when there is something wrong with it.
-       A permanent "open" badge is a developer's reassurance, not a player's. -->
+       A permanent "open" badge is a developer's reassurance, not a player's.
+       A door-refusal (unknown mode) shows its error text instead. -->
   {#if status !== 'open'}
     <div class="conn {status}">
-      {status === 'connecting' ? 'Connecting…' : 'Disconnected'}
+      {status === 'connecting' ? 'Connecting…' : status === 'closed' ? 'Disconnected' : status}
     </div>
   {/if}
 
@@ -661,9 +682,14 @@
           <span class="label">Score</span>
           <span class="value">{selfScore.toLocaleString()}</span>
         </div>
-        <button bind:this={respawnBtn} class="respawn" on:click={respawn} disabled={!canRespawn}>
-          RESPAWN
-        </button>
+        <div class="death-actions">
+          <button bind:this={respawnBtn} class="respawn" on:click={respawn} disabled={!canRespawn}>
+            RESPAWN
+          </button>
+          <button class="exit" on:click={() => dispatch('exit')}>
+            MODES
+          </button>
+        </div>
       </div>
     </div>
   {/if}
@@ -713,6 +739,20 @@
   @keyframes pop {
     from { transform: scale(1.18); color: var(--accent-hi); }
     to { transform: scale(1); color: var(--ink); }
+  }
+  /* Which world you are in. Faint on purpose: it is a label, not a call to
+     action, and it sits next to the number the eye is actually tracking. */
+  .hud-score .mode-chip {
+    display: inline-block;
+    margin-top: 0.45rem;
+    padding: 0.18rem 0.5rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--sunken);
+    font-family: var(--font-display);
+    font-size: 0.58rem;
+    letter-spacing: 0.14em;
+    color: var(--ink-dim);
   }
 
   /* --- Connection ------------------------------------------------------- */
@@ -1004,5 +1044,28 @@
     background: var(--surface-2);
     color: var(--ink-faint);
     cursor: default;
+  }
+  .death-actions {
+    display: flex;
+    gap: 0.6rem;
+  }
+  /* Secondary door: back to the mode picker. Quieter than RESPAWN in every
+     token -- surface, not accent -- so the eye lands on the primary first. */
+  .exit {
+    padding: 0.7rem 1.2rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--ink-dim);
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    letter-spacing: 0.2em;
+    text-indent: 0.2em;
+    cursor: pointer;
+    transition: border-color 140ms ease, color 140ms ease;
+  }
+  .exit:hover {
+    border-color: var(--accent-deep);
+    color: var(--accent-hi);
   }
 </style>

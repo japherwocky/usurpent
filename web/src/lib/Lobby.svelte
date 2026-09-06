@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher, onMount } from 'svelte';
   import Auth from './Auth.svelte';
+  import { fetchModes } from './api.js';
 
   const dispatch = createEventDispatcher();
 
@@ -30,17 +31,15 @@
   let touched = false;
   let session = null;
 
-  // Signed in, there is no name to choose: you are your account. Leaving the
-  // field editable meant the lobby showed two identities at once, and since
-  // the server prefers a client-supplied name over the account
-  // (usurpent.py:925) you could play as "LazyEel" while the score was
-  // credited to "japherwocky".
-  $: accountName = session && !session.guest && session.username ? session.username : null;
-
-  // Shown under the field only once the player has typed something invalid,
-  // so a first-time visitor sees a clean form rather than a rule they have
-  // not broken yet.
-  $: invalid = touched && name.length > 0 && !NAME_RE.test(name);
+  // Joinable modes, served by /api/modes. The client renders buttons from
+  // this list and never hardcodes one, so a mode added server-side shows up
+  // without a client change. The last pick is remembered like the name.
+  let modes = [];
+  let modeId = 'classic';
+  // If /api/modes is unreachable the picker hides but PLAY must still work,
+  // so `selected` falls back to classic rather than to nothing.
+  const FALLBACK_MODE = { id: 'classic', name: 'Classic', description: '' };
+  $: selected = modes.find((m) => m.id === modeId) || modes[0] || FALLBACK_MODE;
 
   onMount(() => {
     // Remember the last name a returning player used. This is the guest name
@@ -48,7 +47,19 @@
     // hands the player back the handle they had.
     const saved = localStorage.getItem('usurpent.name');
     if (saved) name = saved;
+    // Same for the mode. A stale id (a mode the server no longer serves)
+    // falls back to the first served mode via `selected` above.
+    const savedMode = localStorage.getItem('usurpent.mode');
+    if (savedMode) modeId = savedMode;
+    fetchModes()
+      .then((list) => (modes = list))
+      .catch(() => (modes = []));
   });
+
+  function pickMode(m) {
+    modeId = m.id;
+    localStorage.setItem('usurpent.mode', m.id);
+  }
 
   function onSession(e) {
     session = e.detail;
@@ -60,14 +71,15 @@
   }
 
   function play() {
+    if (!selected) return;
     if (accountName) {
-      dispatch('play', { name: accountName });
+      dispatch('play', { name: accountName, mode: selected });
       return;
     }
     let n = (name || '').trim();
     if (!NAME_RE.test(n)) n = randomName();
     localStorage.setItem('usurpent.name', n);
-    dispatch('play', { name: n });
+    dispatch('play', { name: n, mode: selected });
   }
 </script>
 
@@ -107,6 +119,30 @@
         {/if}
       {/if}
     </div>
+
+    <!-- Mode picker. Buttons carry the display face (they are titles);
+         the description underneath is a sentence, so it keeps the UI face. -->
+    {#if modes.length}
+      <div class="modes">
+        <div class="mode-row" role="radiogroup" aria-label="Game mode">
+          {#each modes as m (m.id)}
+            <button
+              type="button"
+              class="mode"
+              class:active={selected && selected.id === m.id}
+              role="radio"
+              aria-checked={selected && selected.id === m.id}
+              on:click={() => pickMode(m)}
+            >
+              {m.name}
+            </button>
+          {/each}
+        </div>
+        {#if selected}
+          <p class="mode-desc">{selected.description}</p>
+        {/if}
+      </div>
+    {/if}
 
     <button class="play" on:click={play}>PLAY</button>
 
@@ -247,6 +283,42 @@
   }
   .hint.bad {
     color: var(--bad);
+  }
+  .modes {
+    margin-top: 0.9rem;
+  }
+  .mode-row {
+    display: flex;
+    gap: 0.4rem;
+  }
+  .mode {
+    flex: 1;
+    padding: 0.5rem 0.3rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--sunken);
+    color: var(--ink-dim);
+    font-family: var(--font-display);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    transition: border-color 140ms ease, color 140ms ease;
+  }
+  .mode:hover {
+    color: var(--accent-hi);
+    border-color: var(--accent-deep);
+  }
+  .mode.active {
+    background: var(--surface-2);
+    border-color: var(--accent-deep);
+    color: var(--accent-hi);
+  }
+  .mode-desc {
+    margin: 0.45rem 0 0;
+    min-height: 2em;
+    font-size: 0.7rem;
+    line-height: 1.45;
+    color: var(--ink-faint);
   }
   .play {
     margin-top: 0.75rem;
