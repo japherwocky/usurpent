@@ -402,8 +402,12 @@ class Player:
         # New life: not yet persisted. session_food is intentionally kept so
         # food from prior lives in this session still counts.
         self.life_persisted = False
-        self.length = config.INITIAL_BODY_LENGTH
-        self.girth = _girth_for_score(0)
+        # Size reads worth (carrying + banked), not the score alone: a
+        # wealthy serpent walks in at the size its banked total implies.
+        # _length_for_score(0) is INITIAL_BODY_LENGTH, so a fresh guest lands
+        # exactly where the old constant did.
+        self.length = _length_for_score(self.banked)
+        self.girth = _girth_for_score(self.banked)
         # Seed the trail as a line behind the head so it renders as a snake.
         # Spacing scales with girth so segments overlap into a connected tube.
         spacing = self._segment_spacing()
@@ -417,6 +421,16 @@ class Player:
 
     def set_target(self, x, y):
         self.target = (x, y)
+
+    def worth(self):
+        """What the size curves read: carrying plus banked.
+
+        Extraction's one economy: wealth makes you bigger. A new run starts
+        at the size your banked total implies, and eating grows you from
+        there. In classic and hardcore banked is always zero, so this is just
+        the score and the curves behave exactly as they always did.
+        """
+        return self.score + self.banked
 
     def step(self, dt):
         """Advance one tick toward the mouse target, capped turn rate."""
@@ -1030,9 +1044,9 @@ class World:
                     food["dead"] = True
                     del self.foods[fid]
                     player.score += food["value"]
-                    player.length = _length_for_score(player.score)
+                    player.length = _length_for_score(player.worth())
                     player.session_food += 1
-                    player.girth = _girth_for_score(player.score)
+                    player.girth = _girth_for_score(player.worth())
 
     def _handle_collisions(self, bodies):
         """Kill any head that has reached another serpent's body -- or, in

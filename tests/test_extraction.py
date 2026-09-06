@@ -92,6 +92,10 @@ def spawn(world, handler=None, x=5000.0, y=5000.0):
     world._next_id += 1
     player = usurpent.Player(str(world._next_id), handler, x, y)
     world.players[player.id] = player
+    # A quiet field: the world seeds thousands of random pellets, and a head
+    # that spawns next to one eats it during the test's tick, turning every
+    # exact-score assertion into a coin flip.
+    world.foods.clear()
     return player
 
 
@@ -237,6 +241,42 @@ def test_bot_heads_for_zone():
     check("target leans toward the zone", dot > 0, f"(dot {dot:.1f})")
 
 
+def test_banked_sizes_the_serpent():
+    print("banked wealth sizes the serpent you walk in as")
+    world = extraction_world()
+    player = spawn(world)
+    player.score = 25
+    mode_of(world).zone = {"x": player.x, "y": player.y,
+                           "r": config.EXTRACTION_ZONE_RADIUS}
+    world.tick()
+    world._respawn_player(player.id)
+    check("respawn sized from banked",
+          player.girth == usurpent._girth_for_score(25)
+          and player.length == usurpent._length_for_score(25),
+          f"(girth {player.girth:.2f})")
+    check("bigger than a fresh guest",
+          player.girth > usurpent._girth_for_score(0))
+    # Eating grows from worth (carrying + banked), not the score alone.
+    player.score = 0
+    world._make_food(player.x, player.y, 2.0, 5, False)
+    value = 5
+    _mesh, _cell, fine, _shard = world._index_food()
+    world._handle_food(fine)
+    check("ate the pellet", player.score == value, repr(player.score))
+    check("girth grew from worth",
+          player.girth == usurpent._girth_for_score(value + 25),
+          f"(girth {player.girth:.2f})")
+    # Classic reads the same curves with banked pinned at zero.
+    classic = usurpent.World(modes.ClassicMode)
+    classic_player = next(p for p in classic.players.values() if not p.is_bot) \
+        if any(not p.is_bot for p in classic.players.values()) else None
+    if classic_player is None:
+        classic.players.clear()
+        classic_player = spawn(classic)
+    check("classic worth is just the score",
+          classic_player.worth() == classic_player.score == 0)
+
+
 def main():
     try:
         test_zone_placement()
@@ -246,6 +286,7 @@ def main():
         test_account_persistence()
         test_leaderboard_ranks_banked()
         test_bot_heads_for_zone()
+        test_banked_sizes_the_serpent()
     finally:
         try:
             os.unlink(_DB_PATH)
