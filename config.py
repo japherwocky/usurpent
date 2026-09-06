@@ -245,6 +245,18 @@ SELF_COLLISION_GRACE_GIRTHS = _env_float("USURPENT_SELF_COLLISION_GRACE_GIRTHS",
 # Lifecycle.
 RESPAWN_DELAY = _env_float("USURPENT_RESPAWN_DELAY", 1.5)      # seconds
 
+# Extraction mode. One zone at a time; reaching it ends the run and banks
+# your carrying score. The zone relocates after every extraction, so the
+# trek to it is the risk window the whole mode hangs on.
+EXTRACTION_ZONE_RADIUS = _env_float("USURPENT_EXTRACTION_ZONE_RADIUS", 120.0)
+# Placed inside the food disc (that is where the play is), this far from any
+# live serpent so it never lands on top of someone...
+EXTRACTION_ZONE_CLEARANCE = _env_float("USURPENT_EXTRACTION_ZONE_CLEARANCE", 800.0)
+# ...and this far from where it was last, so banking always costs a journey.
+EXTRACTION_ZONE_TRAVEL = _env_float("USURPENT_EXTRACTION_ZONE_TRAVEL", 1500.0)
+# Extraction bots feed until they carry this much, then run for the zone.
+BOT_EXTRACT_THRESHOLD = _env_int("USURPENT_BOT_EXTRACT_THRESHOLD", 60)
+
 # Persistence.
 DATABASE_PATH = os.getenv("USURPENT_DATABASE_PATH", "usurpent.db")
 

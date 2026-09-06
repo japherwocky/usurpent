@@ -344,6 +344,11 @@ class Player:
         # Food eaten across this whole session (all lives); persists across
         # respawns. Per-life score lives in self.score (reset on respawn).
         self.session_food = 0
+        # Wealth that has left a run alive (extraction mode). Like
+        # session_food it survives respawns -- that is the entire point of
+        # banking. Registered players also carry it on their Account row, so
+        # it outlives the connection; guests only keep it for the session.
+        self.banked = 0
         # How far this client can see, for interest management. Starts at the
         # full radius so a client that never reports one still sees everything
         # it could need; clamped down to what it asks for once it does.
@@ -509,7 +514,7 @@ class World:
     mode, created lazily when the first client asks for it.
     """
 
-    def __init__(self, mode_cls=None):
+    def __init__(self, mode_cls: "type[modes.GameMode] | None" = None):
         self.mode = (mode_cls or modes.ClassicMode)()
         self.players = {}  # player_id -> Player
         self.foods = {}    # food_id -> (x, y)
@@ -906,6 +911,13 @@ class World:
         player_id = str(self._next_id)
         x, y = self._free_spot()
         player = Player(player_id, handler, x, y)
+        # A registered player walks in with the wealth they banked in earlier
+        # runs -- that is what banking is for. Guests start at zero and keep
+        # their banked only for this session.
+        if player.account_id is not None:
+            account = Account.get_or_none(Account.id == player.account_id)
+            if account is not None:
+                player.banked = account.banked_score
         # Apply the handshake's view distance before anything is sent, so the
         # welcome and its snapshot are already cut to this client's window.
         requested = getattr(handler, "requested_view", None)
@@ -1100,11 +1112,45 @@ class World:
             })
         # Leave a carcass of food where the body fell, then record stats.
         self._drop_carcass(player)
+        self._schedule_return(player)
+
+    def _extract_player(self, player):
+        """End a run the good way: the carrying banks and the serpent leaves.
+
+        The extraction mode's whole economy hangs on the asymmetry with
+        _kill_player: a death scatters your carrying as a carcass for whoever
+        is nearby, an extraction takes it somewhere safe. The banked total
+        lives on the Account row, so it comes back with you next run.
+        """
+        gained = player.score
+        player.banked += gained
+        if player.account_id is not None:
+            account = Account.get_or_none(Account.id == player.account_id)
+            if account is not None:
+                account.banked_score += gained
+                account.save()
+        player.alive = False
+        player.died_at = time.monotonic()
+        logging.info(f"Player extracted ({gained} banked, "
+                     f"total {player.banked})")
+        if player.handler is not None:
+            player.handler.write_message({
+                protocol.FIELD_TYPE: protocol.TYPE_EXTRACTED,
+                protocol.FIELD_BANKED: player.banked,
+                protocol.FIELD_GAINED: gained,
+            })
+        # No carcass: the serpent walked out with its loot rather than falling.
+        self._schedule_return(player)
+
+    def _schedule_return(self, player):
+        """Record the life's stats, and bring bots back on their own.
+
+        A human stays dead until they click RESPAWN (or NEW RUN, after an
+        extraction), so the card can show the score of the life they just
+        finished -- respawn() resets it, so a timer would wipe the number out
+        from under them before they had read it.
+        """
         self._persist_life(player)
-        # Bots come back on their own. A human stays dead until they click
-        # RESPAWN, so the death card can show the score of the life they just
-        # lost -- respawn() resets it, so a timer would wipe the number out
-        # from under them before they had read it.
         if player.is_bot:
             tornado.ioloop.IOLoop.current().call_later(
                 config.RESPAWN_DELAY, self._respawn_player, player.id
@@ -1373,15 +1419,16 @@ class World:
     def _leaderboard(self, viewer):
         """Standings for one viewer: the top N, plus their own rank.
 
-        The sort key belongs to the mode: classic ranks the live score, a
-        run-based mode ranks what has been banked.
+        The key belongs to the mode: classic ranks the live score, a run-based
+        mode ranks what has been banked. The displayed number is the same key
+        -- a board ranked by one thing and showing another would be a lie.
         """
         ranked = sorted(self.players.values(),
                         key=lambda p: self.mode.score_key(p), reverse=True)
         entries = [{
             protocol.FIELD_ID: p.id,
             protocol.FIELD_USERNAME: p.username,
-            protocol.FIELD_SCORE: p.score,
+            protocol.FIELD_SCORE: self.mode.score_key(p),
             protocol.FIELD_IS_BOT: p.is_bot,
             protocol.FIELD_STRATEGY: p.strategy.name if p.strategy else None,
         } for p in ranked[:config.LEADERBOARD_SIZE]]
@@ -1496,6 +1543,17 @@ class World:
         """True on the ticks that carry standings, at LEADERBOARD_HZ."""
         every = max(1, round(config.TICK_HZ / max(0.1, config.LEADERBOARD_HZ)))
         return self.tick_count % every == 0
+
+    def broadcast(self, message):
+        """Send one JSON message to every connected human in this world.
+
+        For rare mode events (the extraction zone moving) that do not belong
+        in the 20 Hz binary snapshot. Bots have no handler and are skipped.
+        """
+        text = json.dumps(message)
+        for player in self.players.values():
+            if player.handler is not None:
+                player.handler.write_message(text)
 
 
 class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):

@@ -33,6 +33,7 @@
     self: 'You crossed your own tail',
     wall: 'You hit the wall',
     snake: 'You were cut off',
+    extracted: 'You made it out',
   };
   $: deathHeadline = DEATH_HEADLINES[deathCause] || 'You died';
 
@@ -179,6 +180,10 @@
         // Why this life ended. The alive flag flips in the snapshot that
         // follows; the card reads this when it appears.
         deathCause = msg.cause || null;
+      } else if (msg.type === 'extracted') {
+        // The run ended the good way. The full banked HUD is coming with the
+        // extraction client card; for now the card at least tells the truth.
+        deathCause = 'extracted';
       }
     };
   }

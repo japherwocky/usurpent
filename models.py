@@ -32,6 +32,10 @@ class Account(BaseModel):
     high_score = peewee.IntegerField(default=0)
     games_played = peewee.IntegerField(default=0)
     total_food = peewee.IntegerField(default=0)
+    # Extraction mode (#368): wealth that has left a run alive. Carrying score
+    # is lost on death; banked score is not, and it is what comes back with
+    # you when you re-enter.
+    banked_score = peewee.IntegerField(default=0)
 
     def set_password(self, raw_password):
         """Hash and store a plaintext password using bcrypt."""

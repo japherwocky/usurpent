@@ -23,11 +23,21 @@ TYPE_ERROR = "error"
 # human-readable twin, and it rides JSON because it is a one-off event, not
 # per-tick state that belongs in the binary frame.
 TYPE_DEATH = "died"
+# The extraction zone: sent in the welcome (so a joining client can render it
+# immediately) and again whenever it moves. Like death, it rides JSON because
+# it is rare state, not per-tick state that belongs in the binary frame.
+TYPE_ZONE = "zone"
+# Sent when a run ends by extraction rather than death: the carrying score
+# banked, and the serpent left the map alive.
+TYPE_EXTRACTED = "extracted"
 
 # Common field names.
 FIELD_TYPE = "type"
 FIELD_ERROR = "error"   # payload of TYPE_ERROR: why the connection was refused
 FIELD_CAUSE = "cause"   # payload of TYPE_DEATH: wall | snake | self
+FIELD_ZONE = "zone"     # {x, y, r} for TYPE_ZONE and the welcome; null = none
+FIELD_BANKED = "banked" # TYPE_EXTRACTED payload: total banked after this run
+FIELD_GAINED = "gained" # TYPE_EXTRACTED payload: what this run added to it
 # Which mode a world plays. Sent in the welcome; the handshake picks one with
 # the ?mode= query arg (default: classic).
 FIELD_MODE = "mode"

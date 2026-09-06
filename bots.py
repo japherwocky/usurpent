@@ -128,5 +128,29 @@ class WandererStrategy(BotStrategy):
                        dy + ay * config.BOT_AVOID_WEIGHT)
 
 
+class ExtractBotStrategy(FoodSeekerStrategy):
+    """Feed like a seeker until carrying enough, then run for the zone.
+
+    The extraction mode's economy, played by a bot: unbanked points are at
+    risk the whole time, so the bot banks early and often. Steering at the
+    zone reuses the same avoidance term, so it dodges bodies on the way.
+    """
+
+    name = "extractor"
+    color = "#7cff4d"
+
+    def think(self, world, bot):
+        zone = getattr(world.mode, "zone", None)
+        if zone is not None and bot.score >= config.BOT_EXTRACT_THRESHOLD:
+            dx = zone["x"] - bot.x
+            dy = zone["y"] - bot.y
+            ax, ay = _avoid_bodies(world, bot, config.BOT_AVOID_RADIUS,
+                                   include_self=world.mode.self_collision)
+            bot.set_target(dx + ax * config.BOT_AVOID_WEIGHT,
+                           dy + ay * config.BOT_AVOID_WEIGHT)
+            return
+        super().think(world, bot)
+
+
 # Round-robin across these when spawning bots, so strategies compete head-to-head.
 REGISTRY = [FoodSeekerStrategy, WandererStrategy]
