@@ -1,17 +1,29 @@
-.PHONY: init demo clean dev test
+# Windows venvs put binaries in Scripts/, Unix in bin/.
+ifeq ($(OS),Windows_NT)
+    PY := ./env/Scripts/python.exe
+    PIP := ./env/Scripts/pip.exe
+    PYTHON := python
+else
+    PY := ./env/bin/python
+    PIP := ./env/bin/pip
+    PYTHON := python3
+endif
+
+.PHONY: init demo dev clean test
 
 init:
-	python3 -m venv ./env
-	./env/bin/pip install -r requirements.txt
+	$(PYTHON) -m venv ./env
+	$(PIP) install -r requirements.txt
 
 demo:
-	./env/bin/python usurpent.py
+	$(PY) usurpent.py
 
 dev:
-	./env/bin/python usurpent.py --debug
+	$(PY) usurpent.py --debug
 
+# shutil so clean works from cmd, PowerShell or bash alike.
 clean:
-	rm -rf ./env
+	$(PYTHON) -c "import shutil; shutil.rmtree('env', ignore_errors=True)"
 
 test:
-	./env/bin/python -m tornado.testing tests
+	$(PY) usurpent.py --runtests=true
