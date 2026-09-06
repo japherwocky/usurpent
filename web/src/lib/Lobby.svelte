@@ -109,6 +109,12 @@
           <span class="as">Playing as</span>
           <span class="who">{accountName}</span>
         </div>
+        {#if session && session.banked > 0}
+          <div class="wealth">
+            <span class="as">Banked</span>
+            <span class="amount">{session.banked.toLocaleString()}</span>
+          </div>
+        {/if}
       {:else}
         <div class="name-row">
           <input
@@ -255,6 +261,28 @@
     font-family: var(--font-display);
     font-size: 0.85rem;
     color: var(--accent-hi);
+  }
+  /* Extraction wealth, carried back into the lobby. Same sunken box as the
+     identity line so the two read as one record. */
+  .wealth {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+    padding: 0.6rem 0.65rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--sunken);
+  }
+  .wealth .as {
+    flex: none;
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+  }
+  .wealth .amount {
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    color: #7cff4d;
   }
   input {
     flex: 1;

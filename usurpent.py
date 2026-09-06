@@ -1452,6 +1452,10 @@ class World:
             protocol.FIELD_SELF_ID: self_id,
             protocol.FIELD_GUEST: player.account_id is None,
             protocol.FIELD_USERNAME: player.username,
+            # Wealth that survived earlier runs (extraction). One field on a
+            # once-per-connection message; the extracted event keeps it fresh
+            # from there.
+            protocol.FIELD_BANKED: player.banked,
             protocol.FIELD_MODE: self.mode.id,
             protocol.FIELD_MAP_WIDTH: config.MAP_WIDTH,
             protocol.FIELD_MAP_HEIGHT: config.MAP_HEIGHT,
@@ -1781,6 +1785,7 @@ class SessionHandler(AuthHandler):
             "username": account.username,
             "high_score": account.high_score,
             "games_played": account.games_played,
+            "banked": account.banked_score,
         })
 
 

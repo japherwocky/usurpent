@@ -383,6 +383,10 @@ export class Game {
     // Ends of the pellet colour ramp, replaced from the welcome.
     this.foodMinRadius = 2;
     this.foodMaxRadius = 34;
+    // The extraction zone, as {x, y, r} or null. Arrives in the welcome and
+    // again whenever it moves; it is rare state, so it rides JSON beside the
+    // binary snapshots rather than inside them.
+    this.zone = null;
     this.onScore = null; // (score:number) => void, called when self score changes
     // Standings, from their own message. Snapshots only carry serpents we can
     // see, so this cannot be read off this.players any more -- and the totals
@@ -415,6 +419,7 @@ export class Game {
     if (msg.body_grid_cell !== undefined) this.bodyGridCell = msg.body_grid_cell;
     if (msg.food_min_radius !== undefined) this.foodMinRadius = msg.food_min_radius;
     if (msg.food_max_radius !== undefined) this.foodMaxRadius = msg.food_max_radius;
+    if (msg.zone !== undefined) this.zone = msg.zone;
     this.players = {};
     msg.players.forEach((p) => (this.players[p.id] = makeState(p, this.selfId)));
     this.foods = new Map();
@@ -443,6 +448,10 @@ export class Game {
     this.selfRank = msg.rank || 0;
     this.totalPlayers = msg.total || 0;
     this.totalBots = msg.bots || 0;
+  }
+
+  onZone(msg) {
+    this.zone = msg.zone || null;
   }
 
   // Parse a binary TYPE_SNAPSHOT frame (see protocol.py BINARY_SNAPSHOT_*).

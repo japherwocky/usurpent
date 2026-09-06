@@ -26,6 +26,12 @@
   // Why this life ended, from the server's `died` message: wall | snake |
   // self. The card's headline says it; cleared on the way back to life.
   let deathCause = null;
+  // Wealth that has survived earlier runs (extraction). Arrives in the
+  // welcome, updated by the extracted event.
+  let banked = 0;
+  // Set when a run ends by extraction: {banked, gained} from the server, so
+  // the card can show what the walk out was worth.
+  let extractResult = null;
 
   // The card's headline. A cause the client does not recognise falls through
   // to the plain version, so a new server-side cause degrades gracefully.
@@ -168,11 +174,14 @@
         particles = mkParticles();
         selfId = msg.self_id;
         selfScore = 0;
+        banked = msg.banked || 0;
       } else if (msg.type === 'snapshot') {
         game.onSnapshot(msg, performance.now());
       } else if (msg.type === 'leaderboard') {
         game.onLeaderboard(msg);
         updateBoard();
+      } else if (msg.type === 'zone') {
+        game.onZone(msg);
       } else if (msg.type === 'error') {
         // Refused at the door (unknown mode, say). The badge carries why.
         status = msg.error || 'refused';
@@ -181,9 +190,11 @@
         // follows; the card reads this when it appears.
         deathCause = msg.cause || null;
       } else if (msg.type === 'extracted') {
-        // The run ended the good way. The full banked HUD is coming with the
-        // extraction client card; for now the card at least tells the truth.
+        // The run ended the good way: the carrying banked. The card shows
+        // what the walk out was worth, and the HUD's banked line moves.
         deathCause = 'extracted';
+        banked = msg.banked || 0;
+        extractResult = { banked: msg.banked || 0, gained: msg.gained || 0 };
       }
     };
   }
@@ -308,6 +319,7 @@
       } else {
         // Back among the living: the old cause has said its piece.
         deathCause = null;
+        extractResult = null;
       }
     }
     if (!alive && !canRespawn && now - deathAt >= game.respawnDelay * 1000) {
@@ -403,6 +415,35 @@
       ctx.arc(ccx, ccy, screenR, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
+    }
+
+    // The extraction zone: where a run ends well. It wants to read as a
+    // place, not a hazard -- a soft green pad with a dashed rim and its name
+    // on it, the opposite mood of everything else on the field that can kill
+    // you. Drawn under the serpents so bodies cross it, not the reverse.
+    if (game.zone) {
+      const z = game.zone;
+      if (visible(z.x, z.y, z.r)) {
+        const [zx, zy] = toScreen(z.x, z.y);
+        const zr = z.r * s;
+        ctx.save();
+        ctx.fillStyle = 'rgba(124, 255, 77, 0.10)';
+        ctx.beginPath();
+        ctx.arc(zx, zy, zr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(124, 255, 77, 0.75)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([14, 10]);
+        ctx.beginPath();
+        ctx.arc(zx, zy, zr, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(124, 255, 77, 0.9)';
+        ctx.font = '11px "Silkscreen", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('EXTRACT', zx, zy + 4);
+        ctx.restore();
+      }
     }
 
     // Spatial grid overlay. Buckets what is on screen by the server's own cell
@@ -612,12 +653,18 @@
 
   <!-- Score. The one number the player is actually playing for, so it gets
        the display face and the size to match. The chip beside it names the
-       world you are in. -->
+       world you are in; extraction adds the number that is already safe. -->
   <div class="hud-score">
     <span class="label">Score</span>
     {#key selfScore}
       <span class="value">{selfScore.toLocaleString()}</span>
     {/key}
+    {#if mode && mode.id === 'extraction'}
+      <span class="banked-line" title="Banked — safe from death">
+        <span class="blabel">Banked</span>
+        <span class="bvalue">{banked.toLocaleString()}</span>
+      </span>
+    {/if}
     {#if mode && mode.name}
       <span class="mode-chip">{mode.name}</span>
     {/if}
@@ -703,12 +750,18 @@
       <div class="death-card">
         <h2>{deathHeadline}</h2>
         <div class="final">
-          <span class="label">Score</span>
-          <span class="value">{selfScore.toLocaleString()}</span>
+          {#if extractResult}
+            <span class="label">Banked</span>
+            <span class="value">{extractResult.banked.toLocaleString()}</span>
+            <span class="gained">+{extractResult.gained.toLocaleString()} this run</span>
+          {:else}
+            <span class="label">Score</span>
+            <span class="value">{selfScore.toLocaleString()}</span>
+          {/if}
         </div>
         <div class="death-actions">
           <button bind:this={respawnBtn} class="respawn" on:click={respawn} disabled={!canRespawn}>
-            RESPAWN
+            {mode && mode.id === 'extraction' ? 'NEW RUN' : 'RESPAWN'}
           </button>
           <button class="exit" on:click={() => dispatch('exit')}>
             MODES
@@ -777,6 +830,27 @@
     font-size: 0.58rem;
     letter-spacing: 0.14em;
     color: var(--ink-dim);
+  }
+  /* Extraction: what is already safe. Green — the zone's colour — so the
+     number and the place it comes from read as one system. */
+  .hud-score .banked-line {
+    display: block;
+    margin-top: 0.45rem;
+  }
+  .hud-score .blabel {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 0.6rem;
+    letter-spacing: 0.22em;
+    color: var(--ink-faint);
+  }
+  .hud-score .bvalue {
+    display: block;
+    margin-top: 0.1rem;
+    font-family: var(--font-display);
+    font-size: 1rem;
+    line-height: 1;
+    color: #7cff4d;
   }
 
   /* --- Connection ------------------------------------------------------- */
@@ -1044,6 +1118,15 @@
     line-height: 1;
     color: var(--ink);
     text-shadow: 0 0 18px var(--glow);
+  }
+  /* Extraction card: what this run added to the safe pile. */
+  .final .gained {
+    display: block;
+    margin-top: 0.4rem;
+    font-family: var(--font-display);
+    font-size: 0.62rem;
+    letter-spacing: 0.14em;
+    color: #7cff4d;
   }
   .respawn {
     padding: 0.7rem 2rem;
