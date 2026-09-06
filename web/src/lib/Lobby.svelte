@@ -31,6 +31,18 @@
   let touched = false;
   let session = null;
 
+  // Signed in, there is no name to choose: you are your account. Leaving the
+  // field editable meant the lobby showed two identities at once, and since
+  // the server prefers a client-supplied name over the account
+  // (usurpent.py:925) you could play as "LazyEel" while the score was
+  // credited to "japherwocky".
+  $: accountName = session && !session.guest && session.username ? session.username : null;
+
+  // Shown under the field only once the player has typed something invalid,
+  // so a first-time visitor sees a clean form rather than a rule they have
+  // not broken yet.
+  $: invalid = touched && name.length > 0 && !NAME_RE.test(name);
+
   // Joinable modes, served by /api/modes. The client renders buttons from
   // this list and never hardcodes one, so a mode added server-side shows up
   // without a client change. The last pick is remembered like the name.
