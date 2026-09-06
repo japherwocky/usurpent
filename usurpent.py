@@ -9,10 +9,10 @@ from typing import Any
 
 import carcass
 import config
+import modes
 import protocol
 import db
 import wire
-from bots import REGISTRY
 
 import os
 import asyncio
@@ -482,9 +482,14 @@ class Player:
 
 
 class World:
-    """Authoritative game state, ticked at a fixed rate."""
+    """Authoritative game state, ticked at a fixed rate.
 
-    def __init__(self):
+    Each world plays one mode (modes.py); a process holds one world per
+    mode, created lazily when the first client asks for it.
+    """
+
+    def __init__(self, mode_cls=None):
+        self.mode = (mode_cls or modes.ClassicMode)()
         self.players = {}  # player_id -> Player
         self.foods = {}    # food_id -> (x, y)
         self._next_id = 0
@@ -499,21 +504,34 @@ class World:
         for _ in range(config.FOOD_COUNT):
             self._spawn_food()
         # Populate the arena with AI bots so humans have opponents from the
-        # first moment. Strategies are assigned round-robin from REGISTRY so
-        # different AIs compete head-to-head.
-        for i in range(config.BOT_COUNT):
-            strategy_cls = REGISTRY[i % len(REGISTRY)]
-            self.spawn_bot(strategy_cls)
+        # first moment. Strategies come from the mode and are assigned
+        # round-robin so different AIs compete head-to-head.
+        strategies = self.mode.bot_strategies()
+        for i in range(config.BOT_COUNT if strategies else 0):
+            self.spawn_bot(strategies[i % len(strategies)])
 
     def start(self):
-        """Begin the simulation loop on the current IOLoop."""
+        """Begin the simulation loop on the current IOLoop.
+
+        Idempotent: a world that is already ticking (or resuming after an
+        idle wind-down) must not stack a second callback, or the sim would
+        run at twice the clock.
+        """
+        if self.is_ticking():
+            return
         interval_ms = 1000.0 / config.TICK_HZ
         self._callback = tornado.ioloop.PeriodicCallback(self.tick, interval_ms)
         self._callback.start()
 
     def stop(self):
+        """Pause the simulation. Bots and food freeze mid-map; the next
+        human to join resumes exactly where this left off (see spawn_player).
+        """
         if self._callback is not None:
             self._callback.stop()
+
+    def is_ticking(self):
+        return self._callback is not None and self._callback.is_running()
 
     def _make_food(self, x, y, radius, value, dropped, owner=None):
         """Store one pellet. Foods are dicts so per-pellet radius/value/dropped
@@ -848,6 +866,10 @@ class World:
         self._make_food(x, y, radius, _value_for_radius(radius), False)
 
     def spawn_player(self, handler):
+        # A human joined. If this world was wound down after its last human
+        # left, this resumes the frozen simulation; on a fresh world it is a
+        # no-op (start is idempotent).
+        self.start()
         self._next_id += 1
         player_id = str(self._next_id)
         x, y = self._free_spot()
@@ -873,6 +895,13 @@ class World:
         self.players.pop(player_id, None)
         logging.info(f"Player {player_id} removed (total: {len(self.players)})")
         self._broadcast_snapshot()
+        # Wind-down: no humans left means nobody is watching this world, so
+        # stop paying for it. Bots and food freeze mid-map and the next join
+        # resumes them (spawn_player -> start). An unplayed mode therefore
+        # costs nothing, however many modes exist.
+        if self.is_ticking() and not any(not p.is_bot for p in self.players.values()):
+            logging.info(f"World {self.mode.id} idle; simulation paused")
+            self.stop()
 
     def spawn_bot(self, strategy_cls):
         """Create an AI-controlled Player (no WebSocket handler)."""
@@ -910,6 +939,9 @@ class World:
         # walk is the expensive part.
         boxes, bodies = self._index_players()
         self._handle_collisions(bodies)
+        # Mode machinery (extraction zones, run timers) runs after the rules
+        # and before the broadcast, so whatever it changes ships this tick.
+        self.mode.on_tick(self, dt)
         self._broadcast_snapshot(boxes)
 
     def _spawn_timer(self, dt):
@@ -1283,8 +1315,13 @@ class World:
         }
 
     def _leaderboard(self, viewer):
-        """Standings for one viewer: the top N, plus their own rank."""
-        ranked = sorted(self.players.values(), key=lambda p: p.score, reverse=True)
+        """Standings for one viewer: the top N, plus their own rank.
+
+        The sort key belongs to the mode: classic ranks the live score, a
+        run-based mode ranks what has been banked.
+        """
+        ranked = sorted(self.players.values(),
+                        key=lambda p: self.mode.score_key(p), reverse=True)
         entries = [{
             protocol.FIELD_ID: p.id,
             protocol.FIELD_USERNAME: p.username,
@@ -1307,11 +1344,12 @@ class World:
         }
 
     def _welcome(self, self_id, player):
-        return {
+        welcome = {
             protocol.FIELD_TYPE: protocol.TYPE_WELCOME,
             protocol.FIELD_SELF_ID: self_id,
             protocol.FIELD_GUEST: player.account_id is None,
             protocol.FIELD_USERNAME: player.username,
+            protocol.FIELD_MODE: self.mode.id,
             protocol.FIELD_MAP_WIDTH: config.MAP_WIDTH,
             protocol.FIELD_MAP_HEIGHT: config.MAP_HEIGHT,
             protocol.FIELD_HEAD_SPEED: config.HEAD_SPEED,
@@ -1340,6 +1378,10 @@ class World:
                 reach=player.view_radius + config.INTEREST_MARGIN,
                 seen=player.handler.food_seen if player.handler else None),
         }
+        # Mode-specific state (a zone position, say) rides the welcome so a
+        # joining client has it before its first snapshot.
+        welcome.update(self.mode.welcome_fields())
+        return welcome
 
     def _broadcast_snapshot(self, boxes=None):
         """Send each connected player the slice of the world they can see.
@@ -1412,12 +1454,27 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
 
     def open(self, *args, **kwargs):
         self.player_id = None
+        self.world = None
         # What bodies this connection has already been sent, so snapshots can
         # carry deltas. Keyed by serpent id -> (epoch, appended, dropped).
         self.body_seen = {}
         # What food pellets this connection has already been sent, so snapshots
         # can carry food deltas. Keyed by pellet id -> last pellet dict.
         self.food_seen = {}
+        # The handshake picks a world: ?mode=<id>, defaulting to classic. An
+        # unknown id is refused at the door rather than quietly dropped into
+        # some other mode's arena.
+        mode_id = self.get_query_argument("mode", default=modes.ClassicMode.id)
+        mode_cls = modes.get_mode(mode_id)
+        if mode_cls is None:
+            logging.warning(f"Refusing connection: unknown mode {mode_id!r}")
+            self.write_message({
+                protocol.FIELD_TYPE: protocol.TYPE_ERROR,
+                protocol.FIELD_ERROR: f"unknown mode: {mode_id}",
+            })
+            self.close(code=4004, reason=f"unknown mode: {mode_id}")
+            return
+        self.world = self.application.get_world(mode_id)
         # Bind to the logged-in account when a session cookie is present;
         # otherwise this is an anonymous guest (allowed to play). The cookie
         # is signed, so we trust it directly rather than re-authenticating.
@@ -1432,13 +1489,13 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
         elif account is not None:
             self.username = account.username
         else:
-            self.username = _assign_guest_name(self.application.world.players.values())
+            self.username = _assign_guest_name(self.world.players.values())
         # Read before spawning: spawn_player sends the welcome and a snapshot
         # straight away, and those should already be sized to this window
         # rather than going out at the full radius and narrowing a tick later.
         self.requested_view = self.get_query_argument(
             protocol.FIELD_VIEW, default=None)
-        self.application.world.spawn_player(self)
+        self.world.spawn_player(self)
 
     def on_message(self, message):
         try:
@@ -1448,7 +1505,10 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
             return
         if data.get(protocol.FIELD_TYPE) != protocol.TYPE_INPUT:
             return
-        player = self.application.world.players.get(self.player_id)
+        world = self.world
+        if world is None:
+            return
+        player = world.players.get(self.player_id)
         if player is None:
             return
         # Boost is an independent flag; it may arrive without a target.
@@ -1459,16 +1519,17 @@ class GameWebSocketHandler(BaseHandler, websocket.WebSocketHandler):
             player.set_view_radius(data[protocol.FIELD_VIEW])
         # The one input a dead player may send.
         if data.get(protocol.FIELD_RESPAWN):
-            self.application.world.request_respawn(self.player_id)
+            world.request_respawn(self.player_id)
         target = data.get(protocol.FIELD_TARGET)
         if isinstance(target, dict) and player.alive:
             player.set_target(float(target[protocol.FIELD_X]),
                               float(target[protocol.FIELD_Y]))
 
     def on_close(self):
+        world = getattr(self, "world", None)
         player_id = getattr(self, "player_id", None)
-        if player_id is not None:
-            self.application.world.remove_player(player_id)
+        if world is not None and player_id is not None:
+            world.remove_player(player_id)
 
     def check_origin(self, origin):
         # Same-origin only for MVP. Tighten via settings if a proxy is added.
@@ -1609,8 +1670,15 @@ class SessionHandler(AuthHandler):
         })
 
 
+class ModesHandler(BaseHandler):
+    """List the game modes a client can join. GET only."""
+
+    def get(self):
+        self.write({protocol.FIELD_MODES: modes.mode_list()})
+
+
 class App (tornado.web.Application):
-    world: World
+    worlds: "dict[str, World]"
 
     def __init__(self, debug=False):
         """
@@ -1630,13 +1698,40 @@ class App (tornado.web.Application):
             (r"/api/login$", LoginHandler),
             (r"/api/logout$", LogoutHandler),
             (r"/api/me$", SessionHandler),
+            (r"/api/modes$", ModesHandler),
             (r"/ws", GameWebSocketHandler),
             (r"/(.*)", SpaStaticFileHandler, {"path": WEB_DIST, "default_filename": "index.html"}),
         ]
 
         super().__init__(handlers, **settings)
-        self.world = World()
-        self.world.start()
+        # One world per mode, created lazily: a mode nobody has joined has no
+        # world, no food field and no bots, and therefore costs nothing. See
+        # get_world and the wind-down in World.remove_player.
+        self.worlds = {}
+
+    def get_world(self, mode_id: str) -> World:
+        """The world playing `mode_id`, built on first request.
+
+        The mode class is validated by the caller (the WS handler refuses
+        unknown ids before reaching here); an unknown id here would mean a
+        caller skipped that door, so it raises rather than guessing.
+        """
+        world = self.worlds.get(mode_id)
+        if world is None:
+            mode_cls = modes.get_mode(mode_id)
+            if mode_cls is None:
+                raise KeyError(f"no such mode: {mode_id}")
+            world = World(mode_cls)
+            world.start()
+            self.worlds[mode_id] = world
+            logging.info(f"World created for mode {mode_id}")
+        return world
+
+    def stop_worlds(self):
+        """Pause every world. Test teardown; the idle wind-down handles the
+        production case one world at a time."""
+        for world in self.worlds.values():
+            world.stop()
 
 
 class SpaStaticFileHandler(tornado.web.StaticFileHandler):

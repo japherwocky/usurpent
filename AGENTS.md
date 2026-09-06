@@ -17,10 +17,16 @@ direction (mouse offset from screen center), not a world target.
 ## Project layout
 
 - `usurpent.py` — Tornado app. `World` (authoritative sim), `Player` (snake
-  state), `GameWebSocketHandler` (`/ws`), `App` (settings + `world` + `init_db`).
+  state), `GameWebSocketHandler` (`/ws`), `App` (settings + one `World` per
+  mode + `init_db`).
 - `config.py` — All gameplay constants. Overridable via `USURPENT_*` env vars.
   No magic numbers elsewhere; import from here.
 - `protocol.py` — WebSocket message types and field names.
+- `modes.py` — Game modes. Each is a class with rule hooks (`self_collision`,
+  `on_tick`, `on_bank`, `score_key`, `bot_strategies`, `welcome_fields`); add
+  one to `REGISTRY` and it is served by `/api/modes` and joinable via
+  `?mode=<id>`. One world per mode, created lazily; a world with no humans
+  winds down (simulation paused) until the next join.
 - `db.py` — Peewee `SqliteDatabase` + `init_db()` (creates tables; called from
   `App.__init__`).
 - `models.py` — `Account` model (registered players) with bcrypt password helpers.
@@ -82,6 +88,8 @@ works fine. Reading `self.xsrf_token` is what sets it.
 - `POST /api/login` — body `{username, password}` → `{ok, username}`.
 - `POST /api/logout` — clears the session.
 - `GET /api/me` — `{guest: true}` or `{guest: false, username, high_score, games_played}`.
+- `GET /api/modes` — `{modes: [{id, name, description}]}`; the client renders
+  its mode buttons from this.
 
 Errors are JSON: `{"error": "..."}` with a matching status code (400/401/409/429).
 Anonymous guests play without a session. The WebSocket (`/ws`) reads the same

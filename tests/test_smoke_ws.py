@@ -139,7 +139,7 @@ async def play_a_tick():
         conn = None
         for _ in range(int(READ_TIMEOUT * config.TICK_HZ)):
             await asyncio.sleep(1.0 / config.TICK_HZ)
-            if self_id not in app.world.players:
+            if self_id not in app.get_world("classic").players:
                 break
         else:
             return "player was not removed from the world after close"
@@ -147,7 +147,7 @@ async def play_a_tick():
     finally:
         if conn is not None:
             conn.close()
-        app.world.stop()
+        app.stop_worlds()
         server.stop()
 
 

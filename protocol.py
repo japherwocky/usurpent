@@ -14,9 +14,20 @@ TYPE_SNAPSHOT = "snapshot"
 # longer be derived from one -- and it never wanted to be, since it is read at
 # a glance and was being rebuilt twenty times a second.
 TYPE_LEADERBOARD = "leaderboard"
+# Sent before the socket is closed when a connection cannot be served at all
+# (an unknown mode in the handshake, say). The close frame carries a code too;
+# this is the human-readable twin.
+TYPE_ERROR = "error"
 
 # Common field names.
 FIELD_TYPE = "type"
+FIELD_ERROR = "error"   # payload of TYPE_ERROR: why the connection was refused
+# Which mode a world plays. Sent in the welcome; the handshake picks one with
+# the ?mode= query arg (default: classic).
+FIELD_MODE = "mode"
+# The /api/modes payload key: a list of {id, name, description}, so the
+# client renders its mode buttons from what the server serves.
+FIELD_MODES = "modes"
 FIELD_SELF_ID = "self_id"
 FIELD_TICK = "tick"
 FIELD_PLAYERS = "players"
