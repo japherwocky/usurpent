@@ -1,0 +1,24 @@
+# Render Blueprint for the USURPENT staging server.
+# Create a "New +" -> "Blueprint" service from this repo and Render reads this file.
+#
+# Notes:
+# - The native Python runtime includes node/npm, so the client build runs in the
+#   same build step as the pip install.
+# - SQLite is ephemeral on Render: accounts and high scores reset on every
+#   deploy/restart. Accepted for staging.
+# - WebSockets are supported natively; the client connects to wss:// on the
+#   same host, no extra config needed.
+services:
+  - type: web
+    name: usurpent-staging
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt && cd web && npm ci && npm run build
+    startCommand: python usurpent.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: COOKIE_SECRET
+        generateValue: true
+      - key: DEBUG
+        value: "false"

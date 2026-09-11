@@ -33,4 +33,5 @@ keys.py
 
 # local QA artifacts
 qa.log
+server.log
 qa_check.py
