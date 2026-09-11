@@ -114,6 +114,25 @@ cd .. && ./env/bin/python usurpent.py
 Tornado serves `web/dist` directly, with an `index.html` fallback for client
 routes - no separate frontend server needed.
 
+### Staging on Render
+
+The repo ships a Render Blueprint (`render.yaml`) for a public staging server:
+
+1. In the [Render dashboard](https://dashboard.render.com): **New +** →
+   **Blueprint** → point it at this repo, branch `main`.
+2. Render reads `render.yaml` and creates a `usurpent-staging` web service:
+   it installs the Python deps, builds `web/dist` (the native Python runtime
+   includes node/npm), and starts the server on `$PORT`.
+3. `COOKIE_SECRET` is generated automatically; `PYTHON_VERSION` is pinned to
+   3.12.11.
+
+Staging caveats:
+
+- The free plan spins the service down after ~15 minutes idle; the first
+  visitor after a cold start waits ~30-60 seconds.
+- SQLite is ephemeral on Render: accounts and high scores reset on every
+  deploy and restart. Fine for staging; use a mounted disk for persistence.
+
 ## Usage
 
 1. Start the backend and frontend dev server as described above
